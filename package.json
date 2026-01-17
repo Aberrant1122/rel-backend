@@ -1,0 +1,48 @@
+{
+  "name": "crm-backened",
+  "version": "1.0.0",
+  "description": "CRM Backend with Authentication",
+  "license": "ISC",
+  "author": "",
+  "type": "commonjs",
+  "main": "server.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "start": "node scripts/railway-start.js",
+    "start:server": "node server.js",
+    "start:force": "node server.js",
+    "dev": "nodemon server.js",
+    "dev:server": "nodemon server.js",
+    "dev:force": "nodemon server.js",
+    "migrate": "node scripts/migrate.js run",
+    "migrate:safe": "node scripts/migrate.js run || echo 'Migration skipped - database not available'",
+    "migrate:status": "node scripts/migrate.js status",
+    "create-migration": "node scripts/create-migration.js",
+    "setup-db": "node scripts/setup-database.js",
+    "test-tables": "node scripts/test-tables.js",
+    "force-oauth-table": "node scripts/force-create-oauth-table.js"
+  },
+  "dependencies": {
+    "@ringcentral/sdk": "^5.0.6",
+    "axios": "^1.13.2",
+    "bcryptjs": "^2.4.3",
+    "cookie-parser": "^1.4.6",
+    "cors": "^2.8.5",
+    "dotenv": "^16.3.1",
+    "express": "^4.18.2",
+    "express-validator": "^7.0.1",
+    "firebase-admin": "^13.6.0",
+    "googleapis": "^169.0.0",
+    "jsonwebtoken": "^9.0.2",
+    "mysql2": "^3.6.5"
+  },
+  "devDependencies": {
+    "@types/cookie-parser": "^1.4.10",
+    "@types/cors": "^2.8.19",
+    "@types/express": "^5.0.6",
+    "@types/node": "^25.0.3",
+    "nodemon": "^3.0.2",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.9.3"
+  }
+}
