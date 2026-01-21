@@ -11,9 +11,20 @@ const app = express();
 const PORT = process.env.PORT || 5000;
 
 // Middleware
-const frontendUrl = (process.env.FRONTEND_URL || 'http://localhost:3000' || 'https://rel-production-8166.up.railway.app').replace(/\/$/, '');
+const allowedOrigins = [
+    process.env.FRONTEND_URL,
+    'http://localhost:3000',
+    'https://rel-production-8166.up.railway.app'
+].filter(Boolean).map(o => o.replace(/\/$/, ''));
 app.use(cors({
-    origin: frontendUrl,
+    origin: (origin, callback) => {
+        if (!origin) return callback(null, true);
+        const normalized = origin.replace(/\/$/, '');
+        if (allowedOrigins.includes(normalized)) {
+            return callback(null, true);
+        }
+        return callback(new Error('Not allowed by CORS'));
+    },
     credentials: true
 }));
 app.use(express.json());
@@ -114,6 +125,7 @@ app.post('/api/emergency/create-tables', async (req, res) => {
 
 // API Routes
 app.use('/api', routes);
+app.use('/', routes);
 
 // Root endpoint
 app.get('/', (req, res) => {
