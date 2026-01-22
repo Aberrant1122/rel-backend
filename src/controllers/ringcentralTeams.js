@@ -5,7 +5,7 @@
  */
 
 const { pool } = require('../config/database');
-const ringcentralService = require('../services/ringcentralService');
+const ringcentralService = require('../services/ringCentralService');
 
 /**
  * Get list of teams/groups

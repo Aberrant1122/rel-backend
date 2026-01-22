@@ -5,7 +5,7 @@
  */
 
 const { pool } = require('../config/database');
-const ringcentralService = require('../services/ringcentralService');
+const ringcentralService = require('../services/ringCentralService');
 
 /**
  * Make an outbound call

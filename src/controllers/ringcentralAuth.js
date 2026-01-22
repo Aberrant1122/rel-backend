@@ -6,7 +6,7 @@
 
 const { getAuthorizationURL, exchangeCodeForTokens } = require('../config/ringcentral');
 const tokenService = require('../services/tokenService');
-const ringcentralService = require('../services/ringcentralService');
+const ringcentralService = require('../services/ringCentralService');
 
 /**
  * Initiate OAuth flow - redirect to RingCentral authorization
@@ -15,7 +15,7 @@ const ringcentralService = require('../services/ringcentralService');
 async function initiateAuth(req, res) {
     try {
         const userId = req.user.id; // Assuming auth middleware sets req.user
-        
+
         // Check if already connected
         const isConnected = await tokenService.isConnected(userId);
         if (isConnected) {
@@ -97,9 +97,9 @@ async function handleCallback(req, res) {
 async function getStatus(req, res) {
     try {
         const userId = req.user.id;
-        
+
         const isConnected = await tokenService.isConnected(userId);
-        
+
         if (!isConnected) {
             return res.json({
                 success: true,
@@ -112,7 +112,7 @@ async function getStatus(req, res) {
         try {
             const accountInfo = await ringcentralService.getAccountInfo(userId);
             const extensionInfo = await ringcentralService.getExtensionInfo(userId);
-            
+
             res.json({
                 success: true,
                 connected: true,
@@ -151,9 +151,9 @@ async function getStatus(req, res) {
 async function disconnect(req, res) {
     try {
         const userId = req.user.id;
-        
+
         const deleted = await tokenService.deleteTokens(userId);
-        
+
         if (deleted) {
             res.json({
                 success: true,
