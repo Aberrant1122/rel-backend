@@ -19,6 +19,9 @@ router.use('/auth', authRoutes);
 router.use('/auth', googleOAuthRoutes);
 router.use('/auth', ringCentralRoutes);
 
+// Mount RingCentral feature routes (calls, messages, teams, meetings)
+router.use('/api', ringCentralRoutes);
+
 // Mount WhatsApp routes
 router.use('/', whatsappRoutes);
 
