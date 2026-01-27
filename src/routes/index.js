@@ -3,7 +3,7 @@ const router = express.Router();
 const authRoutes = require('./authRoutes');
 const googleOAuthRoutes = require('./googleOAuthRoutes');
 const whatsappRoutes = require('./whatsappRoutes');
-const pipelineRoutes = require('./pipelineRoutes');
+
 const analyticsRoutes = require('./analyticsRoutes');
 const dashboardRoutes = require('./dashboardRoutes');
 const leadsRoutes = require('./leadsRoutes');
@@ -26,7 +26,7 @@ router.use('/api', ringCentralRoutes);
 router.use('/', whatsappRoutes);
 
 // Mount pipeline routes
-router.use('/', pipelineRoutes);
+
 
 // Mount analytics routes
 router.use('/', analyticsRoutes);
