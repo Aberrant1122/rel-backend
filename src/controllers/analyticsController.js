@@ -1,4 +1,17 @@
-const { pool } = require('../config/database');
+const { db } = require('../config/firebase');
+
+/**
+ * Normalizes different date formats from Firebase
+ */
+const normalizeDate = (value) => {
+    if (!value) return new Date();
+    if (value.toDate && typeof value.toDate === 'function') return value.toDate();
+    if (value.seconds) return new Date(value.seconds * 1000);
+    if (value._seconds) return new Date(value._seconds * 1000);
+    if (typeof value === 'number') return new Date(value);
+    const date = new Date(value);
+    return isNaN(date.getTime()) ? new Date() : date;
+};
 
 /**
  * Get revenue and leads trend over time
@@ -6,28 +19,7 @@ const { pool } = require('../config/database');
 exports.getRevenueTrend = async (req, res) => {
     try {
         const { months = 6 } = req.query;
-        
-        const query = `
-            SELECT 
-                DATE_FORMAT(created_at, '%b') as month,
-                DATE_FORMAT(created_at, '%Y-%m') as month_key,
-                COUNT(*) as leads,
-                COUNT(CASE WHEN stage = 'Won' THEN 1 END) as won_leads
-            FROM leads
-            WHERE created_at >= DATE_SUB(CURDATE(), INTERVAL ? MONTH)
-            GROUP BY month_key, month
-            ORDER BY month_key ASC
-        `;
-
-        const [results] = await pool.query(query, [parseInt(months)]);
-        
-        // Calculate estimated revenue (assuming average deal size)
-        const avgDealSize = 8500; // This could be configurable
-        const trendData = results.map(row => ({
-            month: row.month,
-            leads: row.leads,
-            revenue: row.won_leads * avgDealSize
-        }));
+        const trendData = await getRevenueTrendData(months);
 
         res.json({
             success: true,
@@ -44,44 +36,11 @@ exports.getRevenueTrend = async (req, res) => {
 };
 
 /**
- * Get conversion funnel data
+ * Get conversion funnel data (Now Passenger Distribution)
  */
 exports.getConversionFunnel = async (req, res) => {
     try {
-        const query = `
-            SELECT 
-                stage,
-                COUNT(*) as value
-            FROM leads
-            WHERE stage IN ('New', 'Contacted', 'Qualified', 'Proposal', 'Won')
-            GROUP BY stage
-            ORDER BY FIELD(stage, 'New', 'Contacted', 'Qualified', 'Proposal', 'Won')
-        `;
-
-        const [results] = await pool.query(query);
-        
-        // Map stage names to more user-friendly names
-        const stageNameMap = {
-            'New': 'New Leads',
-            'Contacted': 'Contacted',
-            'Qualified': 'Qualified',
-            'Proposal': 'Proposal',
-            'Won': 'Closed Won'
-        };
-
-        const colorMap = {
-            'New': '#64748b',
-            'Contacted': '#3b82f6',
-            'Qualified': '#10b981',
-            'Proposal': '#6366f1',
-            'Won': '#059669'
-        };
-
-        const funnelData = results.map(row => ({
-            name: stageNameMap[row.stage] || row.stage,
-            value: row.value,
-            color: colorMap[row.stage] || '#64748b'
-        }));
+        const funnelData = await getConversionFunnelData();
 
         res.json({
             success: true,
@@ -102,59 +61,7 @@ exports.getConversionFunnel = async (req, res) => {
  */
 exports.getPerformanceMetrics = async (req, res) => {
     try {
-        // Get various metrics
-        const metricsQuery = `
-            SELECT 
-                COUNT(*) as total_leads,
-                COUNT(CASE WHEN stage = 'Won' THEN 1 END) as won_leads,
-                COUNT(CASE WHEN stage = 'Lost' THEN 1 END) as lost_leads,
-                AVG(DATEDIFF(updated_at, created_at)) as avg_sales_cycle
-            FROM leads
-        `;
-
-        const [metrics] = await pool.query(metricsQuery);
-        const data = metrics[0];
-
-        // Calculate conversion rate
-        const conversionRate = data.total_leads > 0 
-            ? ((data.won_leads / data.total_leads) * 100).toFixed(1)
-            : 0;
-
-        // Calculate average deal size (this would ideally come from a deals/revenue table)
-        const avgDealSize = 8500;
-
-        // Calculate sales cycle in days
-        const salesCycle = Math.round(data.avg_sales_cycle || 45);
-
-        // Mock customer satisfaction (this would come from a feedback table)
-        const customerSatisfaction = '4.2/5';
-
-        const performanceData = [
-            {
-                metric: 'Lead Conversion',
-                value: `${conversionRate}%`,
-                target: '25%',
-                progress: Math.min(Math.round((parseFloat(conversionRate) / 25) * 100), 100)
-            },
-            {
-                metric: 'Avg Deal Size',
-                value: `$${avgDealSize.toLocaleString()}`,
-                target: '$10,000',
-                progress: Math.round((avgDealSize / 10000) * 100)
-            },
-            {
-                metric: 'Sales Cycle',
-                value: `${salesCycle} days`,
-                target: '40 days',
-                progress: Math.max(Math.round((40 / salesCycle) * 100), 0)
-            },
-            {
-                metric: 'Customer Satisfaction',
-                value: customerSatisfaction,
-                target: '4.5/5',
-                progress: Math.round((4.2 / 4.5) * 100)
-            }
-        ];
+        const performanceData = await getPerformanceMetricsData();
 
         res.json({
             success: true,
@@ -171,37 +78,11 @@ exports.getPerformanceMetrics = async (req, res) => {
 };
 
 /**
- * Get pipeline distribution (for pie chart)
+ * Get pipeline distribution (Now Location Distribution)
  */
 exports.getPipelineDistribution = async (req, res) => {
     try {
-        const query = `
-            SELECT 
-                stage,
-                COUNT(*) as value
-            FROM leads
-            GROUP BY stage
-            ORDER BY value DESC
-        `;
-
-        const [results] = await pool.query(query);
-
-        const colorMap = {
-            'New': '#64748b',
-            'Incoming': '#94a3b8',
-            'Contacted': '#3b82f6',
-            'Qualified': '#10b981',
-            'Proposal': '#6366f1',
-            'Second Wing': '#8b5cf6',
-            'Won': '#059669',
-            'Lost': '#ef4444'
-        };
-
-        const distributionData = results.map(row => ({
-            name: row.stage,
-            value: row.value,
-            color: colorMap[row.stage] || '#64748b'
-        }));
+        const distributionData = await getPipelineDistributionData();
 
         res.json({
             success: true,
@@ -224,12 +105,18 @@ exports.getOverview = async (req, res) => {
     try {
         const { months = 6 } = req.query;
 
-        // Execute all queries in parallel
+        // Fetch all bookings once to avoid multiple database calls
+        const bookingsSnapshot = await db.collection('bookings').get();
+        const bookings = [];
+        bookingsSnapshot.forEach(doc => {
+            bookings.push({ id: doc.id, ...doc.data() });
+        });
+
         const [revenueTrend, conversionFunnel, performanceMetrics, pipelineDistribution] = await Promise.all([
-            getRevenueTrendData(months),
-            getConversionFunnelData(),
-            getPerformanceMetricsData(),
-            getPipelineDistributionData()
+            calculateRevenueTrend(bookings, months),
+            calculatePassengerDistribution(bookings),
+            calculatePerformanceMetrics(bookings),
+            calculateLocationDistribution(bookings)
         ]);
 
         res.json({
@@ -251,141 +138,146 @@ exports.getOverview = async (req, res) => {
     }
 };
 
-// Helper functions for getOverview
-async function getRevenueTrendData(months) {
-    const query = `
-        SELECT 
-            DATE_FORMAT(created_at, '%b') as month,
-            DATE_FORMAT(created_at, '%Y-%m') as month_key,
-            COUNT(*) as leads,
-            COUNT(CASE WHEN stage = 'Won' THEN 1 END) as won_leads
-        FROM leads
-        WHERE created_at >= DATE_SUB(CURDATE(), INTERVAL ? MONTH)
-        GROUP BY month_key, month
-        ORDER BY month_key ASC
-    `;
+// --- Internal Calculation Functions ---
 
-    const [results] = await pool.query(query, [parseInt(months)]);
-    const avgDealSize = 8500;
-    
-    return results.map(row => ({
-        month: row.month,
-        leads: row.leads,
-        revenue: row.won_leads * avgDealSize
-    }));
+async function getRevenueTrendData(months) {
+    const snapshot = await db.collection('bookings').get();
+    const bookings = [];
+    snapshot.forEach(doc => bookings.push(doc.data()));
+    return calculateRevenueTrend(bookings, months);
+}
+
+function calculateRevenueTrend(bookings, months) {
+    const monthNames = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+    const trendMap = {};
+
+    // Initialize required months
+    for (let i = months - 1; i >= 0; i--) {
+        const d = new Date();
+        d.setMonth(d.getMonth() - i);
+        const yearMonth = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+        trendMap[yearMonth] = {
+            month: monthNames[d.getMonth()],
+            revenue: 0,
+            leads: 0
+        };
+    }
+
+    bookings.forEach(b => {
+        const date = normalizeDate(b.created_at || b.createdAt);
+        const yearMonth = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
+        if (trendMap[yearMonth]) {
+            trendMap[yearMonth].leads++;
+            // Estimate revenue based on passengers and distance/hours if available
+            // Simple logic: $50 per booking base + $20 per passenger
+            const passengers = parseInt(b.numberOfPassengers) || 1;
+            const estimate = 50 + (passengers * 20);
+            trendMap[yearMonth].revenue += estimate;
+        }
+    });
+
+    return Object.values(trendMap);
 }
 
 async function getConversionFunnelData() {
-    const query = `
-        SELECT 
-            stage,
-            COUNT(*) as value
-        FROM leads
-        WHERE stage IN ('New', 'Contacted', 'Qualified', 'Proposal', 'Won')
-        GROUP BY stage
-        ORDER BY FIELD(stage, 'New', 'Contacted', 'Qualified', 'Proposal', 'Won')
-    `;
+    const snapshot = await db.collection('bookings').get();
+    const bookings = [];
+    snapshot.forEach(doc => bookings.push(doc.data()));
+    return calculatePassengerDistribution(bookings);
+}
 
-    const [results] = await pool.query(query);
-    
-    const stageNameMap = {
-        'New': 'New Leads',
-        'Contacted': 'Contacted',
-        'Qualified': 'Qualified',
-        'Proposal': 'Proposal',
-        'Won': 'Closed Won'
+function calculatePassengerDistribution(bookings) {
+    const passDist = {
+        '1-2 Pass': 0,
+        '3-4 Pass': 0,
+        '5-7 Pass': 0,
+        '8+ Pass': 0
     };
 
-    const colorMap = {
-        'New': '#64748b',
-        'Contacted': '#3b82f6',
-        'Qualified': '#10b981',
-        'Proposal': '#6366f1',
-        'Won': '#059669'
-    };
+    bookings.forEach(b => {
+        const p = parseInt(b.numberOfPassengers) || 0;
+        if (p <= 2) passDist['1-2 Pass']++;
+        else if (p <= 4) passDist['3-4 Pass']++;
+        else if (p <= 7) passDist['5-7 Pass']++;
+        else passDist['8+ Pass']++;
+    });
 
-    return results.map(row => ({
-        name: stageNameMap[row.stage] || row.stage,
-        value: row.value,
-        color: colorMap[row.stage] || '#64748b'
+    const colors = ['#059669', '#10b981', '#34d399', '#6ee7b7'];
+    return Object.entries(passDist).map(([name, value], index) => ({
+        name,
+        value,
+        color: colors[index % colors.length]
     }));
 }
 
 async function getPerformanceMetricsData() {
-    const metricsQuery = `
-        SELECT 
-            COUNT(*) as total_leads,
-            COUNT(CASE WHEN stage = 'Won' THEN 1 END) as won_leads,
-            COUNT(CASE WHEN stage = 'Lost' THEN 1 END) as lost_leads,
-            AVG(DATEDIFF(updated_at, created_at)) as avg_sales_cycle
-        FROM leads
-    `;
+    const snapshot = await db.collection('bookings').get();
+    const bookings = [];
+    snapshot.forEach(doc => bookings.push(doc.data()));
+    return calculatePerformanceMetrics(bookings);
+}
 
-    const [metrics] = await pool.query(metricsQuery);
-    const data = metrics[0];
-
-    const conversionRate = data.total_leads > 0 
-        ? ((data.won_leads / data.total_leads) * 100).toFixed(1)
-        : 0;
-
-    const avgDealSize = 8500;
-    const salesCycle = Math.round(data.avg_sales_cycle || 45);
-    const customerSatisfaction = '4.2/5';
+function calculatePerformanceMetrics(bookings) {
+    const totalBookings = bookings.length;
+    const totalPassengers = bookings.reduce((sum, b) => sum + (parseInt(b.numberOfPassengers) || 0), 0);
+    const avgPassengers = totalBookings > 0 ? (totalPassengers / totalBookings).toFixed(1) : 0;
+    const uniqueClients = new Set(bookings.map(b => b.email).filter(Boolean)).size;
 
     return [
         {
-            metric: 'Lead Conversion',
-            value: `${conversionRate}%`,
-            target: '25%',
-            progress: Math.min(Math.round((parseFloat(conversionRate) / 25) * 100), 100)
+            metric: 'Total Bookings',
+            value: totalBookings.toString(),
+            target: '100',
+            progress: Math.min(Math.round((totalBookings / 100) * 100), 100)
         },
         {
-            metric: 'Avg Deal Size',
-            value: `$${avgDealSize.toLocaleString()}`,
-            target: '$10,000',
-            progress: Math.round((avgDealSize / 10000) * 100)
+            metric: 'Total Passengers',
+            value: totalPassengers.toString(),
+            target: '500',
+            progress: Math.min(Math.round((totalPassengers / 500) * 100), 100)
         },
         {
-            metric: 'Sales Cycle',
-            value: `${salesCycle} days`,
-            target: '40 days',
-            progress: Math.max(Math.round((40 / salesCycle) * 100), 0)
+            metric: 'Avg Passengers',
+            value: `${avgPassengers}`,
+            target: '4.0',
+            progress: Math.min(Math.round((parseFloat(avgPassengers) / 4.0) * 100), 100)
         },
         {
-            metric: 'Customer Satisfaction',
-            value: customerSatisfaction,
-            target: '4.5/5',
-            progress: Math.round((4.2 / 4.5) * 100)
+            metric: 'Unique Clients',
+            value: uniqueClients.toString(),
+            target: '50',
+            progress: Math.min(Math.round((uniqueClients / 50) * 100), 100)
         }
     ];
 }
 
 async function getPipelineDistributionData() {
-    const query = `
-        SELECT 
-            stage,
-            COUNT(*) as value
-        FROM leads
-        GROUP BY stage
-        ORDER BY value DESC
-    `;
-
-    const [results] = await pool.query(query);
-
-    const colorMap = {
-        'New': '#64748b',
-        'Incoming': '#94a3b8',
-        'Contacted': '#3b82f6',
-        'Qualified': '#10b981',
-        'Proposal': '#6366f1',
-        'Second Wing': '#8b5cf6',
-        'Won': '#059669',
-        'Lost': '#ef4444'
-    };
-
-    return results.map(row => ({
-        name: row.stage,
-        value: row.value,
-        color: colorMap[row.stage] || '#64748b'
-    }));
+    const snapshot = await db.collection('bookings').get();
+    const bookings = [];
+    snapshot.forEach(doc => bookings.push(doc.data()));
+    return calculateLocationDistribution(bookings);
 }
+
+function calculateLocationDistribution(bookings) {
+    const locationMap = {};
+    bookings.forEach(b => {
+        let loc = b.pickupLocation || 'Other';
+        // Try to extract city or main part of address
+        let parts = loc.split(',');
+        let city = parts.length > 1 ? parts[parts.length - 2].trim() : parts[0].trim();
+        if (city.length > 20) city = city.substring(0, 17) + '...';
+
+        locationMap[city] = (locationMap[city] || 0) + 1;
+    });
+
+    const colors = ['#0f172a', '#334155', '#475569', '#64748b', '#94a3b8', '#cbd5e1'];
+    return Object.entries(locationMap)
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, 6)
+        .map(([name, value], index) => ({
+            name,
+            value,
+            color: colors[index % colors.length]
+        }));
+}
+

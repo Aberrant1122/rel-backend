@@ -1,108 +1,53 @@
 const { pool } = require('../config/database');
+const { db } = require('../config/firebase');
+
+/**
+ * Normalizes different date formats from Firebase
+ */
+const normalizeDate = (value) => {
+    if (!value) return new Date();
+    if (value.toDate && typeof value.toDate === 'function') return value.toDate();
+    if (value.seconds) return new Date(value.seconds * 1000);
+    if (value._seconds) return new Date(value._seconds * 1000);
+    if (typeof value === 'number') return new Date(value);
+    const date = new Date(value);
+    return isNaN(date.getTime()) ? new Date() : date;
+};
 
 /**
  * Get dashboard statistics
  */
 exports.getDashboardStats = async (req, res) => {
     try {
-        // Get total leads
-        const [totalLeadsResult] = await pool.query('SELECT COUNT(*) as count FROM leads');
-        const totalLeads = totalLeadsResult[0].count;
+        const snapshot = await db.collection('bookings').get();
+        const bookings = [];
+        snapshot.forEach(doc => bookings.push({ id: doc.id, ...doc.data() }));
 
-        // Get won leads this month for revenue calculation
-        const [wonLeadsResult] = await pool.query(`
-            SELECT COUNT(*) as count 
-            FROM leads 
-            WHERE stage = 'Won' 
-            AND MONTH(updated_at) = MONTH(CURDATE())
-            AND YEAR(updated_at) = YEAR(CURDATE())
-        `);
-        const wonLeadsThisMonth = wonLeadsResult[0].count;
+        const totalBookings = bookings.length;
 
-        // Calculate revenue (assuming average deal size of $8,500)
-        const avgDealSize = 8500;
-        const revenue = wonLeadsThisMonth * avgDealSize;
+        // Calculate estimated revenue
+        const revenue = bookings.reduce((sum, b) => {
+            const passengers = parseInt(b.numberOfPassengers) || 1;
+            return sum + (50 + (passengers * 20)); // Same estimate logic as analytics
+        }, 0);
 
-        // Get conversion rate
-        const [conversionResult] = await pool.query(`
-            SELECT 
-                COUNT(*) as total,
-                SUM(CASE WHEN stage = 'Won' THEN 1 ELSE 0 END) as won
-            FROM leads
-        `);
-        const conversionRate = conversionResult[0].total > 0 
-            ? ((conversionResult[0].won / conversionResult[0].total) * 100).toFixed(1)
-            : 0;
+        const uniqueClients = new Set(bookings.map(b => b.email).filter(Boolean)).size;
 
-        // Get active deals (not Won or Lost)
-        const [activeDealsResult] = await pool.query(`
-            SELECT COUNT(*) as count 
-            FROM leads 
-            WHERE stage NOT IN ('Won', 'Lost')
-        `);
-        const activeDeals = activeDealsResult[0].count;
-
-        // Get pipeline stage counts
-        const [pipelineResult] = await pool.query(`
-            SELECT 
-                stage,
-                COUNT(*) as count
-            FROM leads
-            GROUP BY stage
-        `);
-
-        // Map stages with colors
-        const stageColorMap = {
-            'New': { bgColor: 'bg-slate-50', textColor: 'text-slate-700', borderColor: 'border-slate-200' },
-            'Incoming': { bgColor: 'bg-blue-50', textColor: 'text-blue-700', borderColor: 'border-blue-200' },
-            'Contacted': { bgColor: 'bg-indigo-50', textColor: 'text-indigo-700', borderColor: 'border-indigo-200' },
-            'Qualified': { bgColor: 'bg-emerald-50', textColor: 'text-emerald-700', borderColor: 'border-emerald-200' },
-            'Proposal': { bgColor: 'bg-purple-50', textColor: 'text-purple-700', borderColor: 'border-purple-200' },
-            'Second Wing': { bgColor: 'bg-amber-50', textColor: 'text-amber-700', borderColor: 'border-amber-200' },
-            'Won': { bgColor: 'bg-green-50', textColor: 'text-green-700', borderColor: 'border-green-200' },
-            'Lost': { bgColor: 'bg-red-50', textColor: 'text-red-700', borderColor: 'border-red-200' }
-        };
-
-        const allStages = ['New', 'Incoming', 'Contacted', 'Qualified', 'Proposal', 'Second Wing', 'Won', 'Lost'];
-        const pipelineStages = allStages.map(stageName => {
-            const stageData = pipelineResult.find(s => s.stage === stageName);
-            return {
-                name: stageName,
-                stage: stageName,
-                count: stageData ? stageData.count : 0,
-                ...stageColorMap[stageName]
-            };
-        });
-
-        // Get recent leads count (last 7 days)
-        const [recentLeadsResult] = await pool.query(`
-            SELECT COUNT(*) as count 
-            FROM leads 
-            WHERE created_at >= DATE_SUB(CURDATE(), INTERVAL 7 DAY)
-        `);
-        const recentLeadsCount = recentLeadsResult[0].count;
-
-        // Get lost leads this month
-        const [lostLeadsResult] = await pool.query(`
-            SELECT COUNT(*) as count 
-            FROM leads 
-            WHERE stage = 'Lost' 
-            AND MONTH(updated_at) = MONTH(CURDATE())
-            AND YEAR(updated_at) = YEAR(CURDATE())
-        `);
-        const lostLeadsThisMonth = lostLeadsResult[0].count;
+        // Recent bookings (last 7 days)
+        const sevenDaysAgo = new Date();
+        sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
+        const recentBookingsCount = bookings.filter(b => normalizeDate(b.created_at || b.createdAt) >= sevenDaysAgo).length;
 
         res.json({
             success: true,
             data: {
-                totalLeads,
+                totalLeads: totalBookings, // Keep key for frontend compatibility
                 revenue,
-                conversionRate: parseFloat(conversionRate),
-                activeDeals,
-                pipelineStages,
-                recentLeadsCount,
-                wonLeadsThisMonth,
-                lostLeadsThisMonth
+                conversionRate: 100, // No pipeline, so 100% conversion to "lead"
+                activeDeals: totalBookings,
+                pipelineStages: [], // Removed as requested
+                recentLeadsCount: recentBookingsCount,
+                uniqueClients
             }
         });
     } catch (error) {
@@ -120,100 +65,69 @@ exports.getDashboardStats = async (req, res) => {
  */
 exports.getKPIs = async (req, res) => {
     try {
-        // Get current month stats
-        const [currentMonthStats] = await pool.query(`
-            SELECT 
-                COUNT(*) as total_leads,
-                SUM(CASE WHEN stage = 'Won' THEN 1 ELSE 0 END) as won_leads,
-                SUM(CASE WHEN stage NOT IN ('Won', 'Lost') THEN 1 ELSE 0 END) as active_deals
-            FROM leads
-            WHERE MONTH(created_at) = MONTH(CURDATE())
-            AND YEAR(created_at) = YEAR(CURDATE())
-        `);
+        const snapshot = await db.collection('bookings').get();
+        const bookings = [];
+        snapshot.forEach(doc => bookings.push({ id: doc.id, ...doc.data() }));
 
-        // Get previous month stats for comparison
-        const [previousMonthStats] = await pool.query(`
-            SELECT 
-                COUNT(*) as total_leads,
-                SUM(CASE WHEN stage = 'Won' THEN 1 ELSE 0 END) as won_leads,
-                SUM(CASE WHEN stage NOT IN ('Won', 'Lost') THEN 1 ELSE 0 END) as active_deals
-            FROM leads
-            WHERE MONTH(created_at) = MONTH(DATE_SUB(CURDATE(), INTERVAL 1 MONTH))
-            AND YEAR(created_at) = YEAR(DATE_SUB(CURDATE(), INTERVAL 1 MONTH))
-        `);
+        const now = new Date();
+        const currentMonth = now.getMonth();
+        const currentYear = now.getFullYear();
 
-        const current = currentMonthStats[0];
-        const previous = previousMonthStats[0];
+        const prevMonthDate = new Date();
+        prevMonthDate.setMonth(prevMonthDate.getMonth() - 1);
+        const prevMonth = prevMonthDate.getMonth();
+        const prevYear = prevMonthDate.getFullYear();
 
-        // Calculate changes
-        const leadsChange = previous.total_leads > 0 
-            ? (((current.total_leads - previous.total_leads) / previous.total_leads) * 100).toFixed(1)
+        const currentMonthBookings = bookings.filter(b => {
+            const d = normalizeDate(b.created_at || b.createdAt);
+            return d.getMonth() === currentMonth && d.getFullYear() === currentYear;
+        });
+
+        const prevMonthBookings = bookings.filter(b => {
+            const d = normalizeDate(b.created_at || b.createdAt);
+            return d.getMonth() === prevMonth && d.getFullYear() === prevYear;
+        });
+
+        const calculateRevenue = (list) => list.reduce((sum, b) => {
+            const p = parseInt(b.numberOfPassengers) || 1;
+            return sum + (50 + (p * 20));
+        }, 0);
+
+        const currRevenue = calculateRevenue(currentMonthBookings);
+        const prevRevenue = calculateRevenue(prevMonthBookings);
+
+        const leadsChange = prevMonthBookings.length > 0
+            ? (((currentMonthBookings.length - prevMonthBookings.length) / prevMonthBookings.length) * 100).toFixed(1)
             : 0;
 
-        const avgDealSize = 8500;
-        const currentRevenue = current.won_leads * avgDealSize;
-        const previousRevenue = previous.won_leads * avgDealSize;
-        const revenueChange = previousRevenue > 0 
-            ? (((currentRevenue - previousRevenue) / previousRevenue) * 100).toFixed(1)
+        const venueChange = prevRevenue > 0
+            ? (((currRevenue - prevRevenue) / prevRevenue) * 100).toFixed(1)
             : 0;
-
-        // Get overall conversion rate
-        const [conversionStats] = await pool.query(`
-            SELECT 
-                COUNT(*) as total,
-                SUM(CASE WHEN stage = 'Won' THEN 1 ELSE 0 END) as won
-            FROM leads
-        `);
-        const conversionRate = conversionStats[0].total > 0 
-            ? ((conversionStats[0].won / conversionStats[0].total) * 100).toFixed(1)
-            : 0;
-
-        // Get previous period conversion rate
-        const [prevConversionStats] = await pool.query(`
-            SELECT 
-                COUNT(*) as total,
-                SUM(CASE WHEN stage = 'Won' THEN 1 ELSE 0 END) as won
-            FROM leads
-            WHERE created_at < DATE_SUB(CURDATE(), INTERVAL 1 MONTH)
-        `);
-        const prevConversionRate = prevConversionStats[0].total > 0 
-            ? ((prevConversionStats[0].won / prevConversionStats[0].total) * 100)
-            : 0;
-        const conversionChange = prevConversionRate > 0 
-            ? (((parseFloat(conversionRate) - prevConversionRate) / prevConversionRate) * 100).toFixed(1)
-            : 0;
-
-        const dealsChange = previous.active_deals > 0 
-            ? (((current.active_deals - previous.active_deals) / previous.active_deals) * 100).toFixed(1)
-            : 0;
-
-        // Get total leads count
-        const [totalLeadsResult] = await pool.query('SELECT COUNT(*) as count FROM leads');
 
         const kpis = [
             {
-                title: 'Total Leads',
-                value: totalLeadsResult[0].count.toString(),
+                title: 'Total Bookings',
+                value: bookings.length.toString(),
                 change: `${leadsChange >= 0 ? '+' : ''}${leadsChange}%`,
                 trend: leadsChange >= 0 ? 'up' : 'down'
             },
             {
-                title: 'Revenue',
-                value: `$${(currentRevenue / 1000).toFixed(1)}k`,
-                change: `${revenueChange >= 0 ? '+' : ''}${revenueChange}%`,
-                trend: revenueChange >= 0 ? 'up' : 'down'
+                title: 'Est. Revenue',
+                value: `$${(currRevenue / 1000).toFixed(1)}k`,
+                change: `${venueChange >= 0 ? '+' : ''}${venueChange}%`,
+                trend: venueChange >= 0 ? 'up' : 'down'
             },
             {
-                title: 'Conversion Rate',
-                value: `${conversionRate}%`,
-                change: `${conversionChange >= 0 ? '+' : ''}${conversionChange}%`,
-                trend: conversionChange >= 0 ? 'up' : 'down'
+                title: 'Total Clients',
+                value: new Set(bookings.map(b => b.email).filter(Boolean)).size.toString(),
+                change: 'New',
+                trend: 'up'
             },
             {
-                title: 'Active Deals',
-                value: current.active_deals.toString(),
-                change: `${dealsChange >= 0 ? '+' : ''}${dealsChange}%`,
-                trend: dealsChange >= 0 ? 'up' : 'down'
+                title: 'Monthly Bookings',
+                value: currentMonthBookings.length.toString(),
+                change: `${leadsChange >= 0 ? '+' : ''}${leadsChange}%`,
+                trend: leadsChange >= 0 ? 'up' : 'down'
             }
         ];
 
@@ -232,52 +146,13 @@ exports.getKPIs = async (req, res) => {
 };
 
 /**
- * Get pipeline overview for dashboard
+ * Get pipeline overview (Redundant now, but keeping for compatibility)
  */
 exports.getPipelineOverview = async (req, res) => {
-    try {
-        const [pipelineResult] = await pool.query(`
-            SELECT 
-                stage,
-                COUNT(*) as count
-            FROM leads
-            GROUP BY stage
-        `);
-
-        const stageColorMap = {
-            'New': { bgColor: 'bg-slate-50', textColor: 'text-slate-700', borderColor: 'border-slate-200' },
-            'Incoming': { bgColor: 'bg-blue-50', textColor: 'text-blue-700', borderColor: 'border-blue-200' },
-            'Contacted': { bgColor: 'bg-indigo-50', textColor: 'text-indigo-700', borderColor: 'border-indigo-200' },
-            'Qualified': { bgColor: 'bg-emerald-50', textColor: 'text-emerald-700', borderColor: 'border-emerald-200' },
-            'Proposal': { bgColor: 'bg-purple-50', textColor: 'text-purple-700', borderColor: 'border-purple-200' },
-            'Second Wing': { bgColor: 'bg-amber-50', textColor: 'text-amber-700', borderColor: 'border-amber-200' },
-            'Won': { bgColor: 'bg-green-50', textColor: 'text-green-700', borderColor: 'border-green-200' },
-            'Lost': { bgColor: 'bg-red-50', textColor: 'text-red-700', borderColor: 'border-red-200' }
-        };
-
-        const allStages = ['New', 'Incoming', 'Contacted', 'Qualified', 'Proposal', 'Second Wing'];
-        const pipelineStages = allStages.map(stageName => {
-            const stageData = pipelineResult.find(s => s.stage === stageName);
-            return {
-                name: stageName,
-                stage: stageName,
-                count: stageData ? stageData.count : 0,
-                ...stageColorMap[stageName]
-            };
-        });
-
-        res.json({
-            success: true,
-            data: pipelineStages
-        });
-    } catch (error) {
-        console.error('Error fetching pipeline overview:', error);
-        res.status(500).json({
-            success: false,
-            message: 'Failed to fetch pipeline overview',
-            error: error.message
-        });
-    }
+    res.json({
+        success: true,
+        data: []
+    });
 };
 
 /**
@@ -285,9 +160,10 @@ exports.getPipelineOverview = async (req, res) => {
  */
 exports.getUpcomingTasks = async (req, res) => {
     try {
-        const userId = req.user.id;
+        const userId = req.user?.id || 1; // Fallback if no user context
         const limit = parseInt(req.query.limit) || 5;
 
+        // Note: Tasks are still in MySQL
         const [tasks] = await pool.query(`
             SELECT 
                 t.id,
@@ -297,11 +173,9 @@ exports.getUpcomingTasks = async (req, res) => {
                 t.priority,
                 t.status,
                 t.lead_id,
-                l.name as lead_name,
                 t.created_at,
                 t.updated_at
             FROM tasks t
-            LEFT JOIN leads l ON t.lead_id = l.id
             WHERE t.user_id = ? 
             AND t.status IN ('Pending', 'In Progress')
             AND (t.due_date IS NULL OR t.due_date >= CURDATE())
@@ -310,16 +184,10 @@ exports.getUpcomingTasks = async (req, res) => {
                     WHEN t.due_date IS NULL THEN 1 
                     ELSE 0 
                 END,
-                t.due_date ASC,
-                CASE t.priority 
-                    WHEN 'High' THEN 1 
-                    WHEN 'Medium' THEN 2 
-                    WHEN 'Low' THEN 3 
-                END
+                t.due_date ASC
             LIMIT ?
         `, [userId, limit]);
 
-        // Format tasks for frontend
         const formattedTasks = tasks.map(task => ({
             id: task.id,
             title: task.title,
@@ -328,7 +196,7 @@ exports.getUpcomingTasks = async (req, res) => {
             priority: task.priority,
             status: task.status,
             leadId: task.lead_id,
-            leadName: task.lead_name || 'No Lead'
+            leadName: 'Customer' // Simplified
         }));
 
         res.json({
@@ -344,5 +212,6 @@ exports.getUpcomingTasks = async (req, res) => {
         });
     }
 };
+
 
 
