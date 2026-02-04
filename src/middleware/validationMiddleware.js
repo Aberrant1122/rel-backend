@@ -30,8 +30,8 @@ const registerValidation = [
 
     body('role')
         .optional()
-        .isIn(['user', 'admin'])
-        .withMessage('Role must be either "user" or "admin"')
+        .isIn(['user', 'employee', 'admin'])
+        .withMessage('Role must be either "user", "employee" or "admin"')
 ];
 
 /**
