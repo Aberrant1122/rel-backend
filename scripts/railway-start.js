@@ -44,8 +44,15 @@ async function railwayStart() {
             await migrationRunner.runMigrations();
             console.log('✅ Migrations completed successfully');
         } catch (error) {
-            console.warn('⚠️  Migration warning:', error.message);
-            console.warn('💡 Server will start anyway. Check logs for details.');
+            console.warn('⚠️  Migration failed:', error.message);
+            
+            // Check if it's the known duplicate column issue
+            if (error.message.includes('Duplicate column name')) {
+                console.warn('🔧 Detected duplicate column issue. Run hotfix script:');
+                console.warn('   node scripts/railway-hotfix.js');
+            }
+            
+            console.warn('💡 Server will continue starting. Migrations can be run later.');
         }
     } else {
         console.warn('⚠️  Database not ready after waiting. Starting server anyway...');
