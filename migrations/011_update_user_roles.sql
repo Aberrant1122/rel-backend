@@ -1,14 +1,12 @@
--- Migration: Update user roles to include 'employee'
--- Description: Modifies the users table role column to allow 'employee' and 'admin' (and optionally 'user' for backwards compatibility during migration)
+-- Migration: 011_update_user_roles.sql
+-- Description: Ensures the users table role column supports 'employee' and defaults to it.
 
--- Step 1: Modify the role column to include 'employee'
+-- 1. Modify the role column to include 'employee'
+-- We include 'user' for backwards compatibility if the table was initially created with it.
 ALTER TABLE users MODIFY COLUMN role ENUM('user', 'employee', 'admin') DEFAULT 'employee';
 
--- Step 2: Update any existing 'user' roles to 'employee' if needed
+-- 2. Update any records using the old 'user' role to 'employee'
 UPDATE users SET role = 'employee' WHERE role = 'user';
 
--- Step 3: Set default to 'employee' if it wasn't already
+-- 3. Set the default to 'employee' explicitly
 ALTER TABLE users ALTER COLUMN role SET DEFAULT 'employee';
-
--- Step 4: (Optional cleanup) Re-modify to only include what we want, but 'user' is safer to keep for now if there are dependencies
--- ALTER TABLE users MODIFY COLUMN role ENUM('employee', 'admin') DEFAULT 'employee';

@@ -89,7 +89,7 @@ app.get('/api/health', async (req, res) => {
 app.post('/api/emergency/create-tables', async (req, res) => {
     try {
         const { pool } = require('./src/config/database');
-        
+
         // Create google_oauth_tokens table
         await pool.execute(`
             CREATE TABLE IF NOT EXISTS google_oauth_tokens (
@@ -164,13 +164,13 @@ app.use((err, req, res, next) => {
 // Initialize database and start server
 const startServer = async () => {
     let migrationSuccess = false;
-    
+
     try {
         // Test database connection with retries for Railway
         console.log('🔄 Testing database connection...');
         let dbConnected = false;
         let retries = 5;
-        
+
         while (!dbConnected && retries > 0) {
             dbConnected = await testConnection();
             if (!dbConnected) {
@@ -184,7 +184,7 @@ const startServer = async () => {
             console.warn('⚠️  Database connection failed after retries. Starting server anyway...');
         } else {
             console.log('✅ Database connection established');
-            
+
             // Run database migrations safely
             console.log('🔄 Running database migrations...');
             const migrationRunner = new MigrationRunner();
@@ -203,7 +203,7 @@ const startServer = async () => {
                 try {
                     await User.createTable();
                     await User.createRefreshTokensTable();
-                    
+
                     // Create WhatsApp/Lead tables
                     const Lead = require('./src/models/Lead');
                     await Lead.createTable();
@@ -213,7 +213,7 @@ const startServer = async () => {
                     // Create Tasks table
                     const Task = require('./src/models/Task');
                     await Task.createTable();
-                    
+
                     console.log('✅ Legacy tables created');
                 } catch (tableError) {
                     console.warn('⚠️  Some tables may not be available:', tableError.message);
@@ -257,7 +257,7 @@ const startServer = async () => {
             console.log(`📊 Migrations: ${migrationSuccess ? '✅ Completed' : '⚠️  Pending'}`);
             console.log(`\n✅ Ready to accept requests\n`);
         });
-        
+
     } catch (error) {
         console.error('❌ Server startup error:', error.message);
         // Don't exit - try to start server anyway for Railway

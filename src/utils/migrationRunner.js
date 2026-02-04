@@ -37,7 +37,7 @@ class MigrationRunner {
                 INDEX idx_filename (filename)
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
         `;
-        
+
         await pool.execute(query);
         console.log('✅ Migrations table ready');
     }
@@ -79,7 +79,7 @@ class MigrationRunner {
     async executeMigration(filename) {
         const filePath = path.join(this.migrationsPath, filename);
         const sql = await fs.readFile(filePath, 'utf8');
-        
+
         // Split SQL file by semicolons and execute each statement
         const statements = sql
             .split(';')
@@ -87,14 +87,15 @@ class MigrationRunner {
             .filter(stmt => stmt.length > 0 && !stmt.startsWith('--'));
 
         console.log(`🔄 Executing migration: ${filename}`);
-        
+
         for (const statement of statements) {
-            if (statement.trim()) {
+            const trimmedStatement = statement.trim();
+            if (trimmedStatement) {
                 try {
-                    await pool.execute(statement);
+                    await pool.query(trimmedStatement);
                 } catch (error) {
                     console.error(`❌ Failed to execute statement in ${filename}:`);
-                    console.error(`SQL: ${statement.substring(0, 100)}...`);
+                    console.error(`SQL: ${trimmedStatement.substring(0, 100)}...`);
                     throw error;
                 }
             }
@@ -114,7 +115,7 @@ class MigrationRunner {
      */
     async runMigrations() {
         console.log('🚀 Starting database migrations...');
-        
+
         // Test database connection first with retries
         try {
             await this.ensureConnection();
@@ -122,7 +123,7 @@ class MigrationRunner {
             console.warn('⚠️  Database not ready for migrations:', error.message);
             throw error;
         }
-        
+
         // Ensure migrations table exists
         try {
             await this.createMigrationsTable();
@@ -130,30 +131,33 @@ class MigrationRunner {
             console.error('❌ Failed to create migrations table:', error.message);
             throw error;
         }
-        
+
         // Get executed and available migrations
         const executedMigrations = await this.getExecutedMigrations();
         const migrationFiles = await this.getMigrationFiles();
-        
+
         // Find pending migrations
         const pendingMigrations = migrationFiles.filter(
             file => !executedMigrations.includes(file)
         );
 
         if (pendingMigrations.length === 0) {
-            console.log('✅ No pending migrations');
+            console.log('✅ No pending migrations (All up to date)');
             return;
         }
 
-        console.log(`📋 Found ${pendingMigrations.length} pending migration(s)`);
-        
+        console.log(`📋 Found ${pendingMigrations.length} pending migration(s): ${pendingMigrations.join(', ')}`);
+
         // Execute pending migrations
         for (const migration of pendingMigrations) {
             try {
+                console.log(`🚀 Executing migration: ${migration}...`);
                 await this.executeMigration(migration);
+                console.log(`✅ Successfully applied: ${migration}`);
             } catch (error) {
-                console.error(`❌ Migration failed: ${migration}`);
-                console.error(`Error: ${error.message}`);
+                console.error(`❌ FATAL error executing migration ${migration}:`);
+                console.error(`   Message: ${error.message}`);
+                console.warn('⚠️  Migration process halted to prevent database inconsistency.');
                 throw error;
             }
         }
@@ -167,12 +171,12 @@ class MigrationRunner {
     async getMigrationStatus() {
         // Test database connection first
         await this.ensureConnection();
-        
+
         await this.createMigrationsTable();
-        
+
         const executedMigrations = await this.getExecutedMigrations();
         const migrationFiles = await this.getMigrationFiles();
-        
+
         const pendingMigrations = migrationFiles.filter(
             file => !executedMigrations.includes(file)
         );
