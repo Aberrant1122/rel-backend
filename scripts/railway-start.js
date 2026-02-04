@@ -37,6 +37,30 @@ async function railwayStart() {
     if (dbReady) {
         console.log('✅ Database is ready!');
         
+        // Emergency role fix first (critical for user creation)
+        console.log('🚨 Running emergency role fix...');
+        try {
+            const mysql = require('mysql2/promise');
+            const connection = await mysql.createConnection({
+                host: process.env.DB_HOST || 'localhost',
+                user: process.env.DB_USER || 'root',
+                password: process.env.DB_PASSWORD || '',
+                database: process.env.DB_NAME || 'crm_auth_db',
+                port: process.env.DB_PORT || 3306
+            });
+
+            // Fix role column to support employee
+            await connection.execute(`
+                ALTER TABLE users MODIFY COLUMN role ENUM('user', 'employee', 'admin') DEFAULT 'employee'
+            `);
+            
+            await connection.end();
+            console.log('✅ Emergency role fix completed');
+        } catch (error) {
+            console.warn('⚠️  Emergency role fix failed:', error.message);
+            console.warn('💡 Continuing startup anyway...');
+        }
+        
         // Run migrations
         console.log('🔄 Running database migrations...');
         try {

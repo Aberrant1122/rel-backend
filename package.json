@@ -20,7 +20,10 @@
     "create-migration": "node scripts/create-migration.js",
     "setup-db": "node scripts/setup-database.js",
     "test-tables": "node scripts/test-tables.js",
-    "force-oauth-table": "node scripts/force-create-oauth-table.js"
+    "force-oauth-table": "node scripts/force-create-oauth-table.js",
+    "hotfix": "node scripts/railway-hotfix.js",
+    "emergency-role-fix": "node scripts/emergency-role-fix.js",
+    "skip-migration-009": "node scripts/skip-migration-009.js"
   },
   "dependencies": {
     "@ringcentral/sdk": "^5.0.6",

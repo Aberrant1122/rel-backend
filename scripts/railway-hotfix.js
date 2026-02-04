@@ -18,10 +18,20 @@ async function runHotfix() {
     try {
         console.log('✅ Database connected');
 
+        // Create migrations table if it doesn't exist
+        await connection.execute(`
+            CREATE TABLE IF NOT EXISTS schema_migrations (
+                id INT AUTO_INCREMENT PRIMARY KEY,
+                filename VARCHAR(255) NOT NULL UNIQUE,
+                executed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                INDEX idx_filename (filename)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+        `);
+
         // Mark problematic migration as completed to skip it
         console.log('📝 Marking migration 009 as completed...');
         await connection.execute(`
-            INSERT IGNORE INTO migrations (filename, executed_at) 
+            INSERT IGNORE INTO schema_migrations (filename, executed_at) 
             VALUES ('009_add_google_email_column.sql', NOW())
         `);
 
@@ -46,7 +56,7 @@ async function runHotfix() {
 
         // Mark hotfix as completed
         await connection.execute(`
-            INSERT IGNORE INTO migrations (filename, executed_at) 
+            INSERT IGNORE INTO schema_migrations (filename, executed_at) 
             VALUES ('012_hotfix_duplicate_column_and_roles.sql', NOW())
         `);
 
