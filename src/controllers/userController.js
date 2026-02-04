@@ -41,7 +41,7 @@ const createUser = async (req, res) => {
         }
 
         // Create new user
-        const user = await User.create({ name, email, password, role: role || 'user' });
+        const user = await User.create({ name, email, password, role: role || 'employee' });
 
         return successResponse(res, 201, 'User created successfully', { user });
     } catch (error) {

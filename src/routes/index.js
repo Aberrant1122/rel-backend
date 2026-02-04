@@ -13,6 +13,7 @@ const calendarRoutes = require('./calendarRoutes');
 const gmailRoutes = require('./gmailRoutes');
 const formsRoutes = require('./formsRoutes');
 const ringCentralRoutes = require('./ringCentralRoutes');
+const attendanceRoutes = require('./attendanceRoutes');
 
 // Mount auth routes (includes Google OAuth)
 router.use('/auth', authRoutes);
@@ -24,6 +25,9 @@ router.use('/api', ringCentralRoutes);
 
 // Mount WhatsApp routes
 router.use('/', whatsappRoutes);
+
+// Mount attendance routes
+router.use('/', attendanceRoutes);
 
 // Mount pipeline routes
 

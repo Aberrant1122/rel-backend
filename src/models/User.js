@@ -12,7 +12,7 @@ class User {
         name VARCHAR(255) NOT NULL,
         email VARCHAR(255) NOT NULL UNIQUE,
         password VARCHAR(255) NOT NULL,
-        role ENUM('user', 'admin') DEFAULT 'user',
+        role ENUM('employee', 'admin') DEFAULT 'employee',
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
         INDEX idx_email (email),
@@ -81,7 +81,7 @@ class User {
 
         const query = `UPDATE users SET ${fields.join(', ')} WHERE id = ?`;
         const [result] = await pool.query(query, values);
-        
+
         return result.affectedRows > 0;
     }
 
@@ -110,7 +110,7 @@ class User {
      * @returns {object} Created user
      */
     static async create(userData) {
-        const { name, email, password, role = 'user' } = userData;
+        const { name, email, password, role = 'employee' } = userData;
 
         // Hash password
         const hashedPassword = await hashPassword(password);

@@ -6,9 +6,9 @@ const tasksService = require('../services/tasksService');
 const getTasks = async (req, res) => {
     try {
         const userId = req.user.id;
-        const { status, priority, lead_id } = req.query;
+        const { status, priority, lead_id, assigned_to } = req.query;
 
-        const tasks = await tasksService.getTasks(userId, { status, priority, lead_id });
+        const tasks = await tasksService.getTasks(userId, { status, priority, lead_id, assigned_to });
 
         res.json({
             success: true,
@@ -61,7 +61,7 @@ const getTaskById = async (req, res) => {
 const createTask = async (req, res) => {
     try {
         const userId = req.user.id;
-        const { title, description, due_date, priority, status, lead_id } = req.body;
+        const { title, description, due_date, priority, status, lead_id, assigned_to } = req.body;
 
         // Validation
         if (!title) {
@@ -78,6 +78,7 @@ const createTask = async (req, res) => {
             priority: priority || 'Medium',
             status: status || 'Pending',
             lead_id,
+            assigned_to,
             user_id: userId
         };
 
@@ -105,7 +106,7 @@ const updateTask = async (req, res) => {
     try {
         const userId = req.user.id;
         const taskId = parseInt(req.params.id);
-        const { title, description, due_date, priority, status, lead_id } = req.body;
+        const { title, description, due_date, priority, status, lead_id, assigned_to } = req.body;
 
         const taskData = {
             title,
@@ -113,7 +114,8 @@ const updateTask = async (req, res) => {
             due_date,
             priority,
             status,
-            lead_id
+            lead_id,
+            assigned_to
         };
 
         const updated = await tasksService.updateTask(taskId, userId, taskData);

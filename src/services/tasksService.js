@@ -4,8 +4,8 @@ const { pool } = require('../config/database');
  * Get all tasks for a user with optional filters
  */
 const getTasks = async (userId, filters = {}) => {
-    let query = 'SELECT * FROM tasks WHERE user_id = ?';
-    const params = [userId];
+    let query = 'SELECT * FROM tasks WHERE (user_id = ? OR assigned_to = ?)';
+    const params = [userId, userId];
 
     if (filters.status) {
         query += ' AND status = ?';
@@ -20,6 +20,11 @@ const getTasks = async (userId, filters = {}) => {
     if (filters.lead_id) {
         query += ' AND lead_id = ?';
         params.push(filters.lead_id);
+    }
+
+    if (filters.assigned_to) {
+        query += ' AND assigned_to = ?';
+        params.push(filters.assigned_to);
     }
 
     query += ' ORDER BY due_date ASC, created_at DESC';
@@ -43,12 +48,12 @@ const getTaskById = async (taskId, userId) => {
  * Create a new task
  */
 const createTask = async (taskData) => {
-    const { title, description, due_date, priority, status, lead_id, user_id } = taskData;
+    const { title, description, due_date, priority, status, lead_id, user_id, assigned_to } = taskData;
 
     const [result] = await pool.query(
-        `INSERT INTO tasks (title, description, due_date, priority, status, lead_id, user_id)
-         VALUES (?, ?, ?, ?, ?, ?, ?)`,
-        [title, description, due_date, priority, status, lead_id, user_id]
+        `INSERT INTO tasks (title, description, due_date, priority, status, lead_id, user_id, assigned_to)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+        [title, description, due_date, priority, status, lead_id, user_id, assigned_to]
     );
 
     const [task] = await pool.query('SELECT * FROM tasks WHERE id = ?', [result.insertId]);
@@ -85,6 +90,10 @@ const updateTask = async (taskId, userId, taskData) => {
     if (taskData.lead_id !== undefined) {
         updates.push('lead_id = ?');
         params.push(taskData.lead_id);
+    }
+    if (taskData.assigned_to !== undefined) {
+        updates.push('assigned_to = ?');
+        params.push(taskData.assigned_to);
     }
 
     if (updates.length === 0) {
