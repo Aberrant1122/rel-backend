@@ -49,10 +49,42 @@ async function railwayStart() {
                 port: process.env.DB_PORT || 3306
             });
 
-            // Fix role column to support employee
-            await connection.execute(`
-                ALTER TABLE users MODIFY COLUMN role ENUM('user', 'employee', 'admin') DEFAULT 'employee'
+            // Check if users table exists
+            const [tables] = await connection.execute(`
+                SELECT COUNT(*) as count 
+                FROM INFORMATION_SCHEMA.TABLES 
+                WHERE TABLE_SCHEMA = DATABASE() 
+                AND TABLE_NAME = 'users'
             `);
+            
+            if (tables[0].count > 0) {
+                // Check current role column definition
+                const [columns] = await connection.execute(`
+                    SELECT COLUMN_TYPE, COLUMN_DEFAULT
+                    FROM INFORMATION_SCHEMA.COLUMNS
+                    WHERE TABLE_SCHEMA = DATABASE()
+                    AND TABLE_NAME = 'users'
+                    AND COLUMN_NAME = 'role'
+                `);
+                
+                if (columns.length > 0) {
+                    const columnType = columns[0].COLUMN_TYPE;
+                    // Check if 'employee' is already in the ENUM
+                    if (!columnType.includes("'employee'")) {
+                        console.log('🔧 Updating role column to include employee...');
+                        await connection.execute(`
+                            ALTER TABLE users MODIFY COLUMN role ENUM('user', 'employee', 'admin') DEFAULT 'employee'
+                        `);
+                        console.log('✅ Role column updated successfully');
+                    } else {
+                        console.log('✅ Role column already supports employee');
+                    }
+                } else {
+                    console.log('⚠️  Role column not found, will be created with correct definition');
+                }
+            } else {
+                console.log('⚠️  Users table does not exist yet, will be created with correct definition');
+            }
             
             await connection.end();
             console.log('✅ Emergency role fix completed');

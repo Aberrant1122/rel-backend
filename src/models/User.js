@@ -22,6 +22,32 @@ class User {
 
         try {
             await pool.query(query);
+            
+            // Ensure role column supports 'employee' (in case table existed with old definition)
+            try {
+                const [columns] = await pool.execute(`
+                    SELECT COLUMN_TYPE
+                    FROM INFORMATION_SCHEMA.COLUMNS
+                    WHERE TABLE_SCHEMA = DATABASE()
+                    AND TABLE_NAME = 'users'
+                    AND COLUMN_NAME = 'role'
+                `);
+                
+                if (columns.length > 0) {
+                    const columnType = columns[0].COLUMN_TYPE;
+                    // Check if 'employee' is already in the ENUM
+                    if (!columnType.includes("'employee'")) {
+                        console.log('🔧 Updating role column to include employee...');
+                        await pool.execute(`
+                            ALTER TABLE users MODIFY COLUMN role ENUM('user', 'employee', 'admin') DEFAULT 'employee'
+                        `);
+                    }
+                }
+            } catch (error) {
+                // Non-fatal error, log and continue
+                console.warn('⚠️  Could not verify/update role column:', error.message);
+            }
+            
             console.log('✅ Users table ready');
         } catch (error) {
             console.error('❌ Error creating users table:', error.message);
