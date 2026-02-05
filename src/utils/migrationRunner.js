@@ -82,68 +82,49 @@ class MigrationRunner {
 
         console.log(`🔄 Executing migration: ${filename}`);
 
-        // Check if file contains stored procedures or DELIMITER (needs special handling)
-        const hasStoredProcedure = /DELIMITER|CREATE\s+PROCEDURE|DROP\s+PROCEDURE/i.test(sql);
-        
-        if (hasStoredProcedure) {
-            // Handle DELIMITER changes for stored procedures
-            // DELIMITER is a MySQL client command, not SQL. When using multipleStatements,
-            // we need to replace the temporary delimiter ($$) with semicolons
-            // and remove DELIMITER commands
-            
-            // Replace DELIMITER $$ ... DELIMITER ; pattern
-            // First, replace procedure body delimiters ($$) with semicolons
-            sql = sql.replace(/\$\$/g, ';');
-            
-            // Remove DELIMITER commands (they're client commands, not SQL)
-            sql = sql.replace(/DELIMITER\s+[^\s;]+/gi, '');
-            
-            // Execute as multi-statement query
+        // Clean SQL: remove DELIMITER commands and handle custom delimiters ($$)
+        // DELIMITER is a client command, not natively supported by MySQL wire protocol.
+
+        // Remove DELIMITER commands (handles 'DELIMITER $$', 'DELIMITER ;', etc.)
+        sql = sql.replace(/DELIMITER\s+\S+/gi, '');
+
+        // Replace custom delimiters ($$) with standard semicolons if used in stored procedures
+        sql = sql.replace(/\$\$/g, ';');
+
+        // Clean comments and whitespace to prepare for multi-statement execution
+        const lines = sql.split('\n');
+        const cleanedLines = lines.map(line => {
+            const trimmedLine = line.trim();
+            // Remove whole-line comments
+            if (trimmedLine.startsWith('--')) {
+                return '';
+            }
+            // Simple inline comment removal (handles -- comments but avoids breaking string literals)
+            const commentIndex = line.indexOf('--');
+            if (commentIndex >= 0 && !line.substring(0, commentIndex).includes("'")) {
+                return line.substring(0, commentIndex).trim();
+            }
+            return line;
+        }).filter(line => line.length > 0);
+
+        const cleanedSql = cleanedLines.join('\n');
+
+        if (cleanedSql.trim()) {
             try {
-                // Remove comments that start with -- (but preserve -- inside strings)
-                const lines = sql.split('\n');
-                const cleanedLines = lines.map(line => {
-                    // Only remove comments at the start of the line or after whitespace
-                    // This is a simple approach - more complex parsing would handle string literals
-                    const trimmedLine = line.trim();
-                    if (trimmedLine.startsWith('--')) {
-                        return '';
-                    }
-                    // Remove inline comments (simple approach)
-                    const commentIndex = line.indexOf('--');
-                    if (commentIndex >= 0 && !line.substring(0, commentIndex).includes("'")) {
-                        return line.substring(0, commentIndex).trim();
-                    }
-                    return line;
-                }).filter(line => line.length > 0);
-                
-                const cleanedSql = cleanedLines.join('\n');
-                
-                // Execute the entire SQL as a multi-statement query
-                await pool.query({ sql: cleanedSql, multipleStatements: true });
+                // Execute using pool.query with multipleStatements: true
+                // This ensures session state (SET @var) is preserved and semicolon-heavy scripts work.
+                await pool.query({
+                    sql: cleanedSql,
+                    multipleStatements: true
+                });
             } catch (error) {
                 console.error(`❌ Failed to execute migration ${filename}:`);
                 console.error(`   Message: ${error.message}`);
-                throw error;
-            }
-        } else {
-            // Standard handling: Split SQL file by semicolons and execute each statement
-            const statements = sql
-                .split(';')
-                .map(stmt => stmt.trim())
-                .filter(stmt => stmt.length > 0 && !stmt.startsWith('--'));
-
-            for (const statement of statements) {
-                const trimmedStatement = statement.trim();
-                if (trimmedStatement) {
-                    try {
-                        await pool.query(trimmedStatement);
-                    } catch (error) {
-                        console.error(`❌ Failed to execute statement in ${filename}:`);
-                        console.error(`SQL: ${trimmedStatement.substring(0, 100)}...`);
-                        throw error;
-                    }
+                // Provide context for parse errors which are common in migrations
+                if (error.code === 'ER_PARSE_ERROR') {
+                    console.log(`   SQL Syntax Error: Check near ${error.sqlMessage}`);
                 }
+                throw error;
             }
         }
 
