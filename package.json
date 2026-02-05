@@ -8,7 +8,8 @@
   "main": "server.js",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
-    "start": "node scripts/railway-start.js",
+    "start": "node scripts/railway-start-proper.js",
+    "start:old": "node scripts/railway-start.js",
     "start:server": "node server.js",
     "start:force": "node server.js",
     "dev": "nodemon server.js",
@@ -20,8 +21,10 @@
     "create-migration": "node scripts/create-migration.js",
     "setup-db": "node scripts/setup-database.js",
     "test-tables": "node scripts/test-tables.js",
+    "check-status": "node check-migration-status.js",
     "force-oauth-table": "node scripts/force-create-oauth-table.js",
     "hotfix": "node scripts/railway-hotfix.js",
+    "railway-fix": "node scripts/railway-fix-all-tables.js",
     "emergency-role-fix": "node scripts/emergency-role-fix.js",
     "skip-migration-009": "node scripts/skip-migration-009.js"
   },
