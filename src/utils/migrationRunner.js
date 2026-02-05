@@ -82,50 +82,71 @@ class MigrationRunner {
 
         console.log(`🔄 Executing migration: ${filename}`);
 
-        // Clean SQL: remove DELIMITER commands and handle custom delimiters ($$)
-        // DELIMITER is a client command, not natively supported by MySQL wire protocol.
+        // Robust SQL statement splitter that handles DELIMITER changes
+        const statements = [];
+        let currentDelimiter = ';';
+        let currentStatement = '';
 
-        // Remove DELIMITER commands (handles 'DELIMITER $$', 'DELIMITER ;', etc.)
-        sql = sql.replace(/DELIMITER\s+\S+/gi, '');
-
-        // Replace custom delimiters ($$) with standard semicolons if used in stored procedures
-        sql = sql.replace(/\$\$/g, ';');
-
-        // Clean comments and whitespace to prepare for multi-statement execution
+        // Split input into lines
         const lines = sql.split('\n');
-        const cleanedLines = lines.map(line => {
+
+        for (let line of lines) {
             const trimmedLine = line.trim();
-            // Remove whole-line comments
-            if (trimmedLine.startsWith('--')) {
-                return '';
-            }
-            // Simple inline comment removal (handles -- comments but avoids breaking string literals)
-            const commentIndex = line.indexOf('--');
-            if (commentIndex >= 0 && !line.substring(0, commentIndex).includes("'")) {
-                return line.substring(0, commentIndex).trim();
-            }
-            return line;
-        }).filter(line => line.length > 0);
-
-        const cleanedSql = cleanedLines.join('\n');
-
-        if (cleanedSql.trim()) {
-            try {
-                // Execute using pool.query with multipleStatements: true
-                // This ensures session state (SET @var) is preserved and semicolon-heavy scripts work.
-                await pool.query({
-                    sql: cleanedSql,
-                    multipleStatements: true
-                });
-            } catch (error) {
-                console.error(`❌ Failed to execute migration ${filename}:`);
-                console.error(`   Message: ${error.message}`);
-                // Provide context for parse errors which are common in migrations
-                if (error.code === 'ER_PARSE_ERROR') {
-                    console.log(`   SQL Syntax Error: Check near ${error.sqlMessage}`);
+            // Handle DELIMITER change command
+            if (trimmedLine.toUpperCase().startsWith('DELIMITER')) {
+                // Collect any pending statement before changing delimiter
+                if (currentStatement.trim()) {
+                    statements.push(currentStatement.trim());
+                    currentStatement = '';
                 }
-                throw error;
+                const parts = trimmedLine.split(/\s+/);
+                if (parts.length > 1) {
+                    currentDelimiter = parts[1];
+                }
+                continue;
             }
+
+            // Append current line to the statement buffer
+            currentStatement += line + '\n';
+
+            // Check if line ends with the active delimiter (ignoring comments)
+            const lineWithoutComments = line.replace(/--.*$/, '').replace(/\/\*.*?\*\//g, '').trim();
+            if (lineWithoutComments.endsWith(currentDelimiter)) {
+                let stmt = currentStatement.trim();
+                // Strip the trailing delimiter
+                const lastIdx = stmt.lastIndexOf(currentDelimiter);
+                if (lastIdx !== -1 && lastIdx >= stmt.length - currentDelimiter.length - 10) {
+                    stmt = stmt.substring(0, lastIdx).trim();
+                }
+
+                if (stmt) {
+                    statements.push(stmt);
+                }
+                currentStatement = '';
+            }
+        }
+
+        // Add any trailing statement
+        if (currentStatement.trim()) {
+            statements.push(currentStatement.trim());
+        }
+
+        // Execute all statements on a single connection to preserve session state (@vars)
+        const connection = await pool.getConnection();
+        try {
+            for (let stmt of statements) {
+                if (!stmt) continue;
+                try {
+                    await connection.query(stmt);
+                } catch (err) {
+                    console.error(`❌ Statement failed in ${filename}:`);
+                    console.error(`SQL Snippet: ${stmt.substring(0, 150)}...`);
+                    console.error(`Error: ${err.message}`);
+                    throw err;
+                }
+            }
+        } finally {
+            connection.release();
         }
 
         // Record migration as executed
