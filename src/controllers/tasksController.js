@@ -1,4 +1,5 @@
 const tasksService = require('../services/tasksService');
+const notificationsService = require('../services/notificationsService');
 
 /**
  * Get all tasks for the authenticated user
@@ -84,6 +85,29 @@ const createTask = async (req, res) => {
 
         const task = await tasksService.createTask(taskData);
 
+        // Create notification if task is assigned to someone
+        if (assigned_to && assigned_to !== userId) {
+            try {
+                const { pool } = require('../config/database');
+                
+                // Get the assigner's name
+                const [users] = await pool.query('SELECT name FROM users WHERE id = ?', [userId]);
+                const assignerName = users[0]?.name || 'Admin';
+                
+                await notificationsService.createNotification(
+                    assigned_to,
+                    'task_assigned',
+                    'New Task Assigned',
+                    `${assignerName} assigned you a task: ${title}`,
+                    task.id,
+                    'task'
+                );
+            } catch (notifError) {
+                console.error('Failed to create notification:', notifError);
+                // Don't fail the request if notification fails
+            }
+        }
+
         res.status(201).json({
             success: true,
             message: 'Task created successfully',
@@ -118,6 +142,22 @@ const updateTask = async (req, res) => {
             assigned_to
         };
 
+        // Get current task to check if assigned_to changed
+        // Need to check both user_id and assigned_to
+        const { pool } = require('../config/database');
+        const [currentTasks] = await pool.query(
+            'SELECT * FROM tasks WHERE id = ? AND (user_id = ? OR assigned_to = ?)',
+            [taskId, userId, userId]
+        );
+        const currentTask = currentTasks[0];
+        
+        if (!currentTask) {
+            return res.status(404).json({
+                success: false,
+                message: 'Task not found'
+            });
+        }
+        
         const updated = await tasksService.updateTask(taskId, userId, taskData);
 
         if (!updated) {
@@ -125,6 +165,27 @@ const updateTask = async (req, res) => {
                 success: false,
                 message: 'Task not found'
             });
+        }
+
+        // Create notification if task assignment changed
+        if (assigned_to && assigned_to !== userId && currentTask && currentTask.assigned_to !== assigned_to) {
+            try {
+                // Get the assigner's name
+                const [users] = await pool.query('SELECT name FROM users WHERE id = ?', [userId]);
+                const assignerName = users[0]?.name || 'Admin';
+                
+                await notificationsService.createNotification(
+                    assigned_to,
+                    'task_assigned',
+                    'Task Assigned to You',
+                    `${assignerName} assigned you a task: ${title || currentTask.title}`,
+                    taskId,
+                    'task'
+                );
+            } catch (notifError) {
+                console.error('Failed to create notification:', notifError);
+                // Don't fail the request if notification fails
+            }
         }
 
         res.json({
@@ -159,6 +220,21 @@ const updateTaskStatus = async (req, res) => {
             });
         }
 
+        // Get current task to check who created it
+        const { pool } = require('../config/database');
+        const [currentTasks] = await pool.query(
+            'SELECT * FROM tasks WHERE id = ? AND (user_id = ? OR assigned_to = ?)',
+            [taskId, userId, userId]
+        );
+        const currentTask = currentTasks[0];
+        
+        if (!currentTask) {
+            return res.status(404).json({
+                success: false,
+                message: 'Task not found'
+            });
+        }
+
         const updated = await tasksService.updateTaskStatus(taskId, userId, status);
 
         if (!updated) {
@@ -166,6 +242,27 @@ const updateTaskStatus = async (req, res) => {
                 success: false,
                 message: 'Task not found'
             });
+        }
+
+        // Create notification if task is completed and user is not the creator
+        if (status === 'Completed' && currentTask.user_id !== userId) {
+            try {
+                // Get the completer's name
+                const [users] = await pool.query('SELECT name FROM users WHERE id = ?', [userId]);
+                const completerName = users[0]?.name || 'User';
+                
+                await notificationsService.createNotification(
+                    currentTask.user_id,
+                    'task_completed',
+                    'Task Completed',
+                    `${completerName} completed the task: ${currentTask.title}`,
+                    taskId,
+                    'task'
+                );
+            } catch (notifError) {
+                console.error('Failed to create notification:', notifError);
+                // Don't fail the request if notification fails
+            }
         }
 
         res.json({

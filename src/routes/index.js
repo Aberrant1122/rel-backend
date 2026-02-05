@@ -14,6 +14,7 @@ const gmailRoutes = require('./gmailRoutes');
 const formsRoutes = require('./formsRoutes');
 const ringCentralRoutes = require('./ringCentralRoutes');
 const attendanceRoutes = require('./attendanceRoutes');
+const notificationsRoutes = require('./notificationsRoutes');
 
 // Mount auth routes (includes Google OAuth)
 router.use('/auth', authRoutes);
@@ -55,6 +56,9 @@ router.use('/gmail', gmailRoutes);
 
 // Mount Forms routes
 router.use('/forms', formsRoutes);
+
+// Mount Notifications routes
+router.use('/notifications', notificationsRoutes);
 
 // Health check endpoint
 router.get('/health', (req, res) => {

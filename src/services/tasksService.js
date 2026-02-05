@@ -112,11 +112,12 @@ const updateTask = async (taskId, userId, taskData) => {
 
 /**
  * Update task status only
+ * Allows both task creator and assigned employee to update status
  */
 const updateTaskStatus = async (taskId, userId, status) => {
     const [result] = await pool.query(
-        'UPDATE tasks SET status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND user_id = ?',
-        [status, taskId, userId]
+        'UPDATE tasks SET status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND (user_id = ? OR assigned_to = ?)',
+        [status, taskId, userId, userId]
     );
 
     return result.affectedRows > 0;
