@@ -31,6 +31,12 @@ CREATE TABLE IF NOT EXISTS reservations (
     assigned_driver_id INT NULL,
     assigned_vehicle_id INT NULL,
     
+    -- Contract Specific Fields
+    contract_start_date DATE NULL,
+    contract_end_date DATE NULL,
+    daily_rate DECIMAL(10,2) NULL,
+    hourly_rate DECIMAL(10,2) NULL,
+    
     -- Metadata
     created_by INT,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -47,5 +53,6 @@ CREATE TABLE IF NOT EXISTS reservations (
     INDEX idx_reservation_number (reservation_number),
     INDEX idx_passenger_id (passenger_id),
     INDEX idx_status (reservation_status),
-    INDEX idx_pickup_date (pickup_date)
+    INDEX idx_pickup_date (pickup_date),
+    INDEX idx_contract_dates (contract_start_date, contract_end_date)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

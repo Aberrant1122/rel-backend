@@ -77,5 +77,5 @@ reservationRoutes.post(
     // allowRoles('admin', 'team', 'passenger'),
     reservationController.cancelReservation
 );
-
+reservationRoutes.get('/drivers/available', reservationController.getAvailableDrivers);
 module.exports = reservationRoutes;
