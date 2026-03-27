@@ -632,48 +632,16 @@ const getAvailableVehicles = async (req, res) => {
     try {
         connection = await pool.getConnection();
 
-        // Check which schema version we have
-        const [columns] = await connection.query(`
-            SELECT COLUMN_NAME 
-            FROM INFORMATION_SCHEMA.COLUMNS 
-            WHERE TABLE_SCHEMA = DATABASE() 
-            AND TABLE_NAME = 'vehicles' 
-            AND COLUMN_NAME IN ('slug', 'vehicle_code')
-        `);
-        
-        const hasNewSchema = columns.some((col: any) => col.COLUMN_NAME === 'slug');
-        const hasOldSchema = columns.some((col: any) => col.COLUMN_NAME === 'vehicle_code');
-        
-        let query;
-        if (hasNewSchema) {
-            // New schema with slug, label, etc.
-            query = `
-                SELECT 
-                    id, slug, label, 
-                    passenger_capacity, luggage_capacity, 
-                    description, features, is_active, sort_order,
-                    created_at, updated_at
-                FROM vehicles 
-                WHERE is_active = true
-                ORDER BY sort_order ASC, label ASC
-            `;
-        } else if (hasOldSchema) {
-            // Old schema with vehicle_code, vehicle_type
-            query = `
-                SELECT 
-                    id, vehicle_code as slug, vehicle_type as label, 
-                    passenger_capacity, luggage_capacity, 
-                    description, null as features, is_active, null as sort_order,
-                    created_at, updated_at
-                FROM vehicles 
-                WHERE is_active = true
-                ORDER BY vehicle_type ASC
-            `;
-        } else {
-            throw new Error('Unknown vehicles table schema');
-        }
-
-        const [vehicles] = await connection.execute(query);
+        const [vehicles] = await connection.execute(
+            `SELECT 
+                id, vehicle_code, vehicle_type, 
+                passenger_capacity, luggage_capacity, 
+                description, hourly_rate, base_fare, per_mile_rate,
+                image_url
+            FROM vehicles 
+            WHERE is_active = true
+            ORDER BY vehicle_type`
+        );
 
         return successResponse(
             res,
