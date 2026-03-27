@@ -14,18 +14,36 @@ const PORT = process.env.PORT || 5000;
 const allowedOrigins = [
     process.env.FRONTEND_URL,
     'http://localhost:3000',
-    'https://rel-production-8166.up.railway.app'
+    'https://rel-production-8166.up.railway.app',
+    'https://rel-dashboard.vercel.app'
 ].filter(Boolean).map(o => o.replace(/\/$/, ''));
+
 app.use(cors({
     origin: (origin, callback) => {
+        // Allow requests with no origin (like mobile apps or curl)
         if (!origin) return callback(null, true);
+        
         const normalized = origin.replace(/\/$/, '');
+        
+        // Check against allowed origins
         if (allowedOrigins.includes(normalized)) {
             return callback(null, true);
         }
+        
+        // Allow *.railway.app and *.vercel.app in production
+        if (process.env.NODE_ENV === 'production') {
+            if (normalized.match(/\.up\.railway\.app$/) || 
+                normalized.match(/\.vercel\.app$/)) {
+                return callback(null, true);
+            }
+        }
+        
+        console.log(`CORS blocked: ${origin} not in allowed origins:`, allowedOrigins);
         return callback(new Error('Not allowed by CORS'));
     },
-    credentials: true
+    credentials: true,
+    methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization']
 }));
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));

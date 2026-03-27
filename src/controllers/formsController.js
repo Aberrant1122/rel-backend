@@ -7,6 +7,17 @@ const { pool } = require('../config/database');
  */
 const getVehicles = async (req, res) => {
     try {
+        // Check if sort_order column exists
+        const [columns] = await pool.query(`
+            SELECT COLUMN_NAME 
+            FROM INFORMATION_SCHEMA.COLUMNS 
+            WHERE TABLE_SCHEMA = DATABASE() 
+            AND TABLE_NAME = 'vehicles' 
+            AND COLUMN_NAME = 'sort_order'
+        `);
+        
+        const hasSortOrder = columns.length > 0;
+        
         const [vehicles] = await pool.query(`
             SELECT v.*, 
                    vp.base_rate, vp.per_mile, vp.per_hour, vp.per_minute,
@@ -16,7 +27,7 @@ const getVehicles = async (req, res) => {
             LEFT JOIN vehicle_service_classes vsc ON v.id = vsc.vehicle_id
             WHERE v.is_active = TRUE
             GROUP BY v.id
-            ORDER BY v.sort_order ASC
+            ${hasSortOrder ? 'ORDER BY v.sort_order ASC' : 'ORDER BY v.id ASC'}
         `);
 
         // Format features and service_classes
