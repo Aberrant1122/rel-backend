@@ -1,6 +1,9 @@
 -- Migration: 016_create_form_configuration_tables.sql
 -- Description: Creates tables for vehicles, pricing, rate configuration, and SQL-based bookings.
 
+-- Disable foreign key checks to allow dropping tables with references
+SET FOREIGN_KEY_CHECKS = 0;
+
 -- Temporarily drop foreign key from drivers table if it exists
 SET @foreign_key_exists = (
     SELECT COUNT(*) 
@@ -160,3 +163,6 @@ SET @add_fk_sql = IF(@fk_check = 0,
 PREPARE add_fk_stmt FROM @add_fk_sql;
 EXECUTE add_fk_stmt;
 DEALLOCATE PREPARE add_fk_stmt;
+
+-- Re-enable foreign key checks
+SET FOREIGN_KEY_CHECKS = 1;

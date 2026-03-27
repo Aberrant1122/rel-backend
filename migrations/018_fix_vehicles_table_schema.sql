@@ -2,6 +2,9 @@
 -- Description: Fixes the vehicles table schema by adding missing columns (slug, sort_order, features)
 -- This migration handles the case where the table already exists with an old schema
 
+-- Disable foreign key checks to allow renaming/recreating tables with references
+SET FOREIGN_KEY_CHECKS = 0;
+
 -- Step 1: Drop foreign key from drivers table temporarily
 SET @fk_exists = (
     SELECT COUNT(*) 
@@ -20,23 +23,68 @@ PREPARE stmt FROM @sql;
 EXECUTE stmt;
 DEALLOCATE PREPARE stmt;
 
--- Step 2: Rename old vehicles table as backup
-RENAME TABLE vehicles TO vehicles_old_backup;
+-- Step 2: Check if vehicles already has the new schema (slug column)
+SET @already_updated = (
+    SELECT COUNT(*) 
+    FROM information_schema.COLUMNS 
+    WHERE TABLE_SCHEMA = DATABASE() 
+    AND TABLE_NAME = 'vehicles' 
+    AND COLUMN_NAME = 'slug'
+);
 
--- Step 3: Create new vehicles table with correct schema
-CREATE TABLE vehicles (
-    id INT AUTO_INCREMENT PRIMARY KEY,
-    slug VARCHAR(100) NOT NULL UNIQUE,
-    label VARCHAR(255) NOT NULL,
-    passenger_capacity INT NOT NULL DEFAULT 4,
-    luggage_capacity INT NOT NULL DEFAULT 2,
-    description TEXT,
-    features JSON,
-    is_active BOOLEAN DEFAULT TRUE,
-    sort_order INT DEFAULT 0,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+-- Wrap Step 2-4 in conditional execution via dynamic SQL
+-- If already updated, we skip the rename and recreate
+SET @rename_and_recreate = IF(@already_updated = 0,
+    "BEGIN; 
+     DROP TABLE IF EXISTS vehicles_old_backup;
+     RENAME TABLE vehicles TO vehicles_old_backup;
+     CREATE TABLE vehicles (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        slug VARCHAR(100) NOT NULL UNIQUE,
+        label VARCHAR(255) NOT NULL,
+        passenger_capacity INT NOT NULL DEFAULT 4,
+        luggage_capacity INT NOT NULL DEFAULT 2,
+        description TEXT,
+        features JSON,
+        is_active BOOLEAN DEFAULT TRUE,
+        sort_order INT DEFAULT 0,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+    COMMIT;",
+    'SELECT "Table already updated with slug, skipping recreate" AS message'
+);
+
+-- Note: We can't use BEGIN/COMMIT in PREPARE, so we separate them or just run them sequentially.
+-- Actually, we can just use IF(condition, 'actual sql', 'select skip') for each step.
+
+SET @rename_sql = IF(@already_updated = 0,
+    'RENAME TABLE vehicles TO vehicles_old_backup',
+    'SELECT "Skipping rename" AS message'
+);
+PREPARE rename_stmt FROM @rename_sql;
+EXECUTE rename_stmt;
+DEALLOCATE PREPARE rename_stmt;
+
+SET @create_sql = IF(@already_updated = 0,
+    'CREATE TABLE vehicles (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        slug VARCHAR(100) NOT NULL UNIQUE,
+        label VARCHAR(255) NOT NULL,
+        passenger_capacity INT NOT NULL DEFAULT 4,
+        luggage_capacity INT NOT NULL DEFAULT 2,
+        description TEXT,
+        features JSON,
+        is_active BOOLEAN DEFAULT TRUE,
+        sort_order INT DEFAULT 0,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci',
+    'SELECT "Skipping create" AS message'
+);
+PREPARE create_stmt FROM @create_sql;
+EXECUTE create_stmt;
+DEALLOCATE PREPARE create_stmt;
 
 -- Step 4: Migrate data from old table if columns exist
 -- Try to copy what we can from the old table
@@ -78,3 +126,6 @@ EXECUTE add_fk_stmt;
 DEALLOCATE PREPARE add_fk_stmt;
 
 -- Note: Old table vehicles_old_backup is kept for safety. Can be dropped manually after verification.
+
+-- Re-enable foreign key checks
+SET FOREIGN_KEY_CHECKS = 1;
