@@ -1,8 +1,9 @@
 -- Migration: 016_create_form_configuration_tables.sql
 -- Description: Creates tables for vehicles, pricing, rate configuration, and SQL-based bookings.
 
--- Vehicles table
-CREATE TABLE IF NOT EXISTS vehicles (
+-- Vehicles table (drop and recreate if needed)
+DROP TABLE IF EXISTS vehicles;
+CREATE TABLE vehicles (
     id INT AUTO_INCREMENT PRIMARY KEY,
     slug VARCHAR(100) NOT NULL UNIQUE,
     label VARCHAR(255) NOT NULL,
