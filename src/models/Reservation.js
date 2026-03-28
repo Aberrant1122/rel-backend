@@ -137,14 +137,15 @@ class Reservation {
         const query = `
             SELECT 
                 r.*,
-                v.vehicle_type, v.vehicle_code, v.passenger_capacity, v.luggage_capacity,
-                v.hourly_rate as vehicle_hourly_rate, v.base_fare, v.per_mile_rate,
+                v.label as vehicle_type, v.slug as vehicle_code, v.passenger_capacity, v.luggage_capacity,
+                vp.per_hour as vehicle_hourly_rate, vp.base_rate as base_fare, vp.per_mile as per_mile_rate,
                 d.id as driver_id,
                 u_driver.name as driver_name,
                 u_driver.phone as driver_phone,
                 u_creator.name as created_by_name
             FROM reservations r
             LEFT JOIN vehicles v ON r.vehicle_type_id = v.id
+            LEFT JOIN vehicle_pricing vp ON v.id = vp.vehicle_id
             LEFT JOIN drivers d ON r.assigned_driver_id = d.id
             LEFT JOIN users u_driver ON d.user_id = u_driver.id
             LEFT JOIN users u_creator ON r.created_by = u_creator.id
@@ -225,7 +226,7 @@ class Reservation {
         const dataQuery = `
             SELECT 
                 r.*,
-                v.vehicle_type, v.vehicle_code,
+                v.label as vehicle_type, v.slug as vehicle_code,
                 d.id as driver_id,
                 u_driver.name as driver_name
             FROM reservations r
@@ -354,7 +355,7 @@ class Reservation {
             SELECT 
                 r.id, r.reservation_number, r.passenger_name,
                 r.pickup_date, r.pickup_time, r.reservation_status,
-                v.vehicle_type
+                v.label as vehicle_type
             FROM reservations r
             LEFT JOIN vehicles v ON r.vehicle_type_id = v.id
             ORDER BY r.created_at DESC

@@ -83,17 +83,33 @@ const getRateConfig = async (req, res) => {
     }
 };
 
-/**
- * Submit a new booking to MySQL
- * @route POST /api/forms/bookings
- * @access Public
- */
 const submitBooking = async (req, res) => {
     try {
         const bookingData = req.body;
         const bookingRef = `BR-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
 
-        const [result] = await pool.query(`
+        // Helper function to extract correct price format
+        const price = bookingData.total_amount ? parseFloat(bookingData.total_amount) : 0;
+        
+        // 1. Find or create passenger in users table
+        let passengerId;
+        const [users] = await pool.query('SELECT id FROM users WHERE email = ?', [bookingData.email]);
+        
+        if (users.length > 0) {
+            passengerId = users[0].id;
+        } else {
+            // Create a generic passenger user
+            const [newUser] = await pool.query(
+                'INSERT INTO users (name, email, phone, password, role) VALUES (?, ?, ?, ?, ?)',
+                [bookingData.full_name || 'Guest', bookingData.email, bookingData.phone || null, Math.random().toString(36).slice(-8), 'user']
+            );
+            passengerId = newUser.insertId;
+        }
+
+        const metadata = bookingData.metadata || {};
+        
+        // 2. Insert into the original form_bookings (for backwards compatibility if needed)
+        const [formResult] = await pool.query(`
             INSERT INTO form_bookings (
                 booking_ref, service_class, event_type, hours, vehicle_type,
                 pickup_location, dropoff_location, pickup_date, pickup_time,
@@ -104,32 +120,70 @@ const submitBooking = async (req, res) => {
             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         `, [
             bookingRef, 
-            bookingData.serviceClass, 
-            bookingData.eventType, 
+            bookingData.service_class, 
+            bookingData.event_type, 
             parseInt(bookingData.hours) || null,
-            bookingData.vehicleType,
-            bookingData.from,
-            bookingData.to,
-            bookingData.date,
-            bookingData.time,
+            bookingData.vehicle_type,
+            bookingData.pickup_location,
+            bookingData.dropoff_location,
+            bookingData.pickup_date,
+            bookingData.pickup_time,
             parseInt(bookingData.passengers) || 1,
-            bookingData.flightNumber,
-            bookingData.notes,
-            bookingData.referenceCode,
-            bookingData.fullName,
+            metadata.flightNumber,
+            metadata.notes,
+            metadata.referenceCode,
+            bookingData.full_name,
             bookingData.email,
             bookingData.phone,
-            bookingData.totalAmount || 0,
-            bookingData.taxAmount || 0,
-            bookingData.gratuityAmount || 0,
-            bookingData.ccFeeAmount || 0,
+            price,
+            metadata.breakdown?.taxes || 0,
+            metadata.breakdown?.gratuity || 0,
+            metadata.breakdown?.ccFee || 0,
             JSON.stringify(bookingData)
+        ]);
+
+        // 3. Insert into the main reservations table so it shows up in dashboard
+        const reservationNumber = `RES-${Date.now().toString().slice(-6)}-${Math.floor(Math.random() * 1000)}`;
+        const tripType = bookingData.service_class === 'hourly' ? 'hourly' : 'distance';
+        
+        // Find vehicle ID mapping (since vehicle_type is a slug from frontend but DB expects an ID)
+        let vehicleTypeId = 1; // Default fallback
+        if (bookingData.vehicle_type) {
+            const [vRows] = await pool.query('SELECT id FROM vehicles WHERE slug = ?', [bookingData.vehicle_type]);
+            if (vRows.length > 0) vehicleTypeId = vRows[0].id;
+        }
+
+        await pool.query(`
+            INSERT INTO reservations (
+                reservation_number, booking_type, trip_type,
+                passenger_id, passenger_name, passenger_email, passenger_phone,
+                pickup_location, dropoff_location, pickup_date, pickup_time,
+                vehicle_type_id, passenger_count,
+                price, payment_status, reservation_status
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `, [
+            reservationNumber,
+            'form',
+            tripType,
+            passengerId,
+            bookingData.full_name || 'Guest',
+            bookingData.email,
+            bookingData.phone || '',
+            bookingData.pickup_location || 'Pending',
+            bookingData.dropoff_location || 'Pending',
+            bookingData.pickup_date || new Date().toISOString().split('T')[0],
+            bookingData.pickup_time || '12:00',
+            vehicleTypeId,
+            parseInt(bookingData.passengers) || 1,
+            price,
+            'pending', // Default payment status
+            'pending'  // Default reservation status
         ]);
 
         res.status(201).json({
             success: true,
             message: 'Booking submitted successfully',
-            data: { id: result.insertId, bookingRef }
+            data: { id: formResult.insertId, bookingRef, reservationNumber }
         });
     } catch (error) {
         console.error('Error submitting booking:', error);

@@ -47,7 +47,7 @@ const createReservation = async (req, res) => {
             } else {
                 const [result] = await connection.execute(
                     'INSERT INTO users (name, email, phone, role, password) VALUES (?, ?, ?, ?, ?)',
-                    [passenger_name, passenger_email, passenger_phone, 'passenger', 'temp123']
+                    [passenger_name, passenger_email, passenger_phone, 'user', 'temp123']
                 );
                 actualPassengerId = result.insertId;
             }
@@ -101,7 +101,7 @@ const createReservation = async (req, res) => {
         // Fetch the created reservation
         const [newReservation] = await connection.execute(
             `SELECT r.*, 
-                v.vehicle_type, v.vehicle_code, v.passenger_capacity, v.luggage_capacity,
+                v.label as vehicle_type, v.slug as vehicle_code, v.passenger_capacity, v.luggage_capacity,
                 u.name as creator_name
             FROM reservations r
             LEFT JOIN vehicles v ON r.vehicle_type_id = v.id
@@ -167,7 +167,7 @@ const getAllReservations = async (req, res) => {
 
         // Get data with pagination and filters
         const dataQuery = `
-            SELECT r.*, v.vehicle_type, v.vehicle_code 
+            SELECT r.*, v.label as vehicle_type, v.slug as vehicle_code 
             FROM reservations r
             LEFT JOIN vehicles v ON r.vehicle_type_id = v.id
             ${whereClause}
@@ -204,8 +204,8 @@ const getReservationById = async (req, res) => {
         const [reservations] = await connection.execute(
             `SELECT 
                 r.*,
-                v.vehicle_type, v.vehicle_code, v.passenger_capacity, v.luggage_capacity,
-                v.hourly_rate as vehicle_hourly_rate, v.base_fare, v.per_mile_rate,
+                v.label as vehicle_type, v.slug as vehicle_code, v.passenger_capacity, v.luggage_capacity,
+                vp.per_hour as vehicle_hourly_rate, vp.base_rate as base_fare, vp.per_mile as per_mile_rate,
                 d.id as driver_id,
                 u_driver.name as driver_name,
                 u_driver.phone as driver_phone,
@@ -214,6 +214,7 @@ const getReservationById = async (req, res) => {
                 u_creator.email as created_by_email
             FROM reservations r
             LEFT JOIN vehicles v ON r.vehicle_type_id = v.id
+            LEFT JOIN vehicle_pricing vp ON v.id = vp.vehicle_id
             LEFT JOIN drivers d ON r.assigned_driver_id = d.id
             LEFT JOIN users u_driver ON d.user_id = u_driver.id
             LEFT JOIN users u_creator ON r.created_by = u_creator.id
@@ -325,7 +326,7 @@ const updateReservation = async (req, res) => {
 
         // Fetch updated reservation
         const [updated] = await connection.execute(
-            `SELECT r.*, v.vehicle_type, v.vehicle_code 
+            `SELECT r.*, v.label as vehicle_type, v.slug as vehicle_code 
             FROM reservations r
             LEFT JOIN vehicles v ON r.vehicle_type_id = v.id
             WHERE r.id = ?`,
@@ -596,7 +597,7 @@ const getPassengerReservations = async (req, res) => {
         const [reservations] = await connection.execute(
             `SELECT 
                 r.*,
-                v.vehicle_type, v.vehicle_code,
+                v.label as vehicle_type, v.slug as vehicle_code,
                 d.id as driver_id,
                 u.name as driver_name
             FROM reservations r
@@ -634,13 +635,14 @@ const getAvailableVehicles = async (req, res) => {
 
         const [vehicles] = await connection.execute(
             `SELECT 
-                id, vehicle_code, vehicle_type, 
-                passenger_capacity, luggage_capacity, 
-                description, hourly_rate, base_fare, per_mile_rate,
-                image_url
-            FROM vehicles 
-            WHERE is_active = true
-            ORDER BY vehicle_type`
+                v.id, v.slug as vehicle_code, v.label as vehicle_type, 
+                v.passenger_capacity, v.luggage_capacity, 
+                v.description, vp.per_hour as hourly_rate, vp.base_rate as base_fare, vp.per_mile as per_mile_rate,
+                NULL as image_url
+            FROM vehicles v
+            LEFT JOIN vehicle_pricing vp ON v.id = vp.vehicle_id
+            WHERE v.is_active = true
+            ORDER BY v.label`
         );
 
         return successResponse(
@@ -701,7 +703,7 @@ const getStats = async (req, res) => {
             `SELECT 
                 r.id, r.reservation_number, r.passenger_name,
                 r.pickup_date, r.pickup_time, r.reservation_status,
-                v.vehicle_type
+                v.label as vehicle_type
             FROM reservations r
             LEFT JOIN vehicles v ON r.vehicle_type_id = v.id
             ORDER BY r.created_at DESC
@@ -743,8 +745,8 @@ const getAvailableDrivers = async (req, res) => {
                 d.license_number,
                 d.status,
                 d.vehicle_id,
-                v.vehicle_type,
-                v.vehicle_code
+                v.label as vehicle_type,
+                v.slug as vehicle_code
             FROM drivers d
             JOIN users u ON d.user_id = u.id
             LEFT JOIN vehicles v ON d.vehicle_id = v.id
