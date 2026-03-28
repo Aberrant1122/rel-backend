@@ -100,8 +100,8 @@ const submitBooking = async (req, res) => {
         } else {
             // Create a generic passenger user
             const [newUser] = await pool.query(
-                'INSERT INTO users (name, email, phone, password, role) VALUES (?, ?, ?, ?, ?)',
-                [bookingData.full_name || 'Guest', bookingData.email, bookingData.phone || null, Math.random().toString(36).slice(-8), 'user']
+                'INSERT INTO users (name, email, password, role) VALUES (?, ?, ?, ?)',
+                [bookingData.full_name || 'Guest', bookingData.email, Math.random().toString(36).slice(-8), 'user']
             );
             passengerId = newUser.insertId;
         }
