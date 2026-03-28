@@ -32,31 +32,16 @@ SET @already_updated = (
     AND COLUMN_NAME = 'slug'
 );
 
--- Wrap Step 2-4 in conditional execution via dynamic SQL
--- If already updated, we skip the rename and recreate
-SET @rename_and_recreate = IF(@already_updated = 0,
-    "BEGIN; 
-     DROP TABLE IF EXISTS vehicles_old_backup;
-     RENAME TABLE vehicles TO vehicles_old_backup;
-     CREATE TABLE vehicles (
-        id INT AUTO_INCREMENT PRIMARY KEY,
-        slug VARCHAR(100) NOT NULL UNIQUE,
-        label VARCHAR(255) NOT NULL,
-        passenger_capacity INT NOT NULL DEFAULT 4,
-        luggage_capacity INT NOT NULL DEFAULT 2,
-        description TEXT,
-        features JSON,
-        is_active BOOLEAN DEFAULT TRUE,
-        sort_order INT DEFAULT 0,
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
-    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
-    COMMIT;",
-    'SELECT "Table already updated with slug, skipping recreate" AS message'
+-- Step 2: Ensure we don't have a backup table from a failed run
+SET @drop_backup_sql = IF(@already_updated = 0,
+    'DROP TABLE IF EXISTS vehicles_old_backup',
+    'SELECT "Skipping drop backup" AS message'
 );
+PREPARE drop_stmt FROM @drop_backup_sql;
+EXECUTE drop_stmt;
+DEALLOCATE PREPARE drop_stmt;
 
--- Note: We can't use BEGIN/COMMIT in PREPARE, so we separate them or just run them sequentially.
--- Actually, we can just use IF(condition, 'actual sql', 'select skip') for each step.
+-- Step 3: Rename and Recreate if needed
 
 SET @rename_sql = IF(@already_updated = 0,
     'RENAME TABLE vehicles TO vehicles_old_backup',
