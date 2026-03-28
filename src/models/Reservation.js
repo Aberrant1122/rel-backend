@@ -141,7 +141,6 @@ class Reservation {
                 vp.per_hour as vehicle_hourly_rate, vp.base_rate as base_fare, vp.per_mile as per_mile_rate,
                 d.id as driver_id,
                 u_driver.name as driver_name,
-                u_driver.phone as driver_phone,
                 u_creator.name as created_by_name
             FROM reservations r
             LEFT JOIN vehicles v ON r.vehicle_type_id = v.id

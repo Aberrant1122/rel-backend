@@ -208,7 +208,6 @@ const getReservationById = async (req, res) => {
                 vp.per_hour as vehicle_hourly_rate, vp.base_rate as base_fare, vp.per_mile as per_mile_rate,
                 d.id as driver_id,
                 u_driver.name as driver_name,
-                u_driver.phone as driver_phone,
                 d.license_number, d.status as driver_status,
                 u_creator.name as created_by_name,
                 u_creator.email as created_by_email
