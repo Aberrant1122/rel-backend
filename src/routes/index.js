@@ -28,42 +28,20 @@ router.use('/api', ringCentralRoutes);
 // Mount WhatsApp routes
 router.use('/', whatsappRoutes);
 
-// Mount attendance routes
-router.use('/', attendanceRoutes);
-
-// Mount pipeline routes
-
-
-// Mount analytics routes
-router.use('/', analyticsRoutes);
-
-// Mount dashboard routes
-router.use('/', dashboardRoutes);
-
-// Mount leads routes
-router.use('/', leadsRoutes);
-
-// Mount user routes
-router.use('/', userRoutes);
-
-// Mount tasks routes
+// Mount specific path routes
 router.use('/tasks', tasksRoutes);
-
-// Mount calendar routes
-router.use('/', calendarRoutes);
-
-// Mount Gmail routes
 router.use('/gmail', gmailRoutes);
-
-// Mount Forms routes
 router.use('/forms', formsRoutes);
-
-// Mount Notifications routes
 router.use('/notifications', notificationsRoutes);
+router.use('/reservations', reservationRoutes);
 
-//reservation routes
-
-router.use("/reservations",reservationRoutes)
+// Mount root path routes
+router.use('/', attendanceRoutes);
+router.use('/', analyticsRoutes);
+router.use('/', dashboardRoutes);
+router.use('/', leadsRoutes);
+router.use('/', userRoutes);
+router.use('/', calendarRoutes);
 
 // Health check endpoint
 router.get('/health', (req, res) => {

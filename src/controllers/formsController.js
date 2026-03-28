@@ -30,11 +30,14 @@ const getVehicles = async (req, res) => {
             ${hasSortOrder ? 'ORDER BY v.sort_order ASC' : 'ORDER BY v.id ASC'}
         `);
 
+        const ALL_SERVICE_CLASSES = ['hourly', 'airport', 'event', 'corporate'];
+
         // Format features and service_classes
         const formattedVehicles = vehicles.map(v => ({
             ...v,
             features: typeof v.features === 'string' ? JSON.parse(v.features) : v.features,
-            service_classes: v.service_classes ? v.service_classes.split(',') : [],
+            // Fallback to all service classes if none are mapped (prevents vehicles from being invisible)
+            service_classes: v.service_classes ? v.service_classes.split(',') : ALL_SERVICE_CLASSES,
             base_rate: v.base_rate !== null ? parseFloat(v.base_rate) : null,
             per_mile: v.per_mile !== null ? parseFloat(v.per_mile) : null,
             per_hour: v.per_hour !== null ? parseFloat(v.per_hour) : null,

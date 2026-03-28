@@ -14,6 +14,7 @@ const PORT = process.env.PORT || 5000;
 const allowedOrigins = [
     process.env.FRONTEND_URL,
     'http://localhost:3000',
+    'http://localhost:3001',
     'https://rel-production-8166.up.railway.app',
     'https://rel-dashboard.vercel.app'
 ].filter(Boolean).map(o => o.replace(/\/$/, ''));
