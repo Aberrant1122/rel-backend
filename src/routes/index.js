@@ -12,7 +12,6 @@ const tasksRoutes = require('./tasks');
 const calendarRoutes = require('./calendarRoutes');
 const gmailRoutes = require('./gmailRoutes');
 const formsRoutes = require('./formsRoutes');
-const ringCentralRoutes = require('./ringCentralRoutes');
 const attendanceRoutes = require('./attendanceRoutes');
 const notificationsRoutes = require('./notificationsRoutes');
 const reservationRoutes = require('./reservationRoutes');
@@ -20,10 +19,6 @@ const reservationRoutes = require('./reservationRoutes');
 // Mount auth routes (includes Google OAuth)
 router.use('/auth', authRoutes);
 router.use('/auth', googleOAuthRoutes);
-router.use('/auth', ringCentralRoutes);
-
-// Mount RingCentral feature routes (calls, messages, teams, meetings)
-router.use('/api', ringCentralRoutes);
 
 // Mount WhatsApp routes
 router.use('/', whatsappRoutes);

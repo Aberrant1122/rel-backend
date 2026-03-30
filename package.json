@@ -29,7 +29,6 @@
     "skip-migration-009": "node scripts/skip-migration-009.js"
   },
   "dependencies": {
-    "@ringcentral/sdk": "^5.0.6",
     "axios": "^1.13.2",
     "bcryptjs": "^2.4.3",
     "cookie-parser": "^1.4.6",
