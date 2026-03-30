@@ -1,7 +1,7 @@
-const { db } = require('../config/firebase');
+const { pool } = require('../config/database');
 
 /**
- * Normalizes different date formats from Firebase
+ * Normalizes different date formats from Firebase or MySQL
  */
 const normalizeDate = (value) => {
     if (!value) return new Date();
@@ -106,11 +106,7 @@ exports.getOverview = async (req, res) => {
         const { months = 6 } = req.query;
 
         // Fetch all bookings once to avoid multiple database calls
-        const bookingsSnapshot = await db.collection('bookings').get();
-        const bookings = [];
-        bookingsSnapshot.forEach(doc => {
-            bookings.push({ id: doc.id, ...doc.data() });
-        });
+        const [bookings] = await pool.query('SELECT * FROM form_bookings ORDER BY created_at DESC');
 
         const [revenueTrend, conversionFunnel, performanceMetrics, pipelineDistribution] = await Promise.all([
             calculateRevenueTrend(bookings, months),
@@ -141,9 +137,7 @@ exports.getOverview = async (req, res) => {
 // --- Internal Calculation Functions ---
 
 async function getRevenueTrendData(months) {
-    const snapshot = await db.collection('bookings').get();
-    const bookings = [];
-    snapshot.forEach(doc => bookings.push(doc.data()));
+    const [bookings] = await pool.query('SELECT * FROM form_bookings ORDER BY created_at DESC');
     return calculateRevenueTrend(bookings, months);
 }
 
@@ -180,9 +174,7 @@ function calculateRevenueTrend(bookings, months) {
 }
 
 async function getConversionFunnelData() {
-    const snapshot = await db.collection('bookings').get();
-    const bookings = [];
-    snapshot.forEach(doc => bookings.push(doc.data()));
+    const [bookings] = await pool.query('SELECT * FROM form_bookings ORDER BY created_at DESC');
     return calculatePassengerDistribution(bookings);
 }
 
@@ -211,9 +203,7 @@ function calculatePassengerDistribution(bookings) {
 }
 
 async function getPerformanceMetricsData() {
-    const snapshot = await db.collection('bookings').get();
-    const bookings = [];
-    snapshot.forEach(doc => bookings.push(doc.data()));
+    const [bookings] = await pool.query('SELECT * FROM form_bookings ORDER BY created_at DESC');
     return calculatePerformanceMetrics(bookings);
 }
 
@@ -252,9 +242,7 @@ function calculatePerformanceMetrics(bookings) {
 }
 
 async function getPipelineDistributionData() {
-    const snapshot = await db.collection('bookings').get();
-    const bookings = [];
-    snapshot.forEach(doc => bookings.push(doc.data()));
+    const [bookings] = await pool.query('SELECT * FROM form_bookings ORDER BY created_at DESC');
     return calculateLocationDistribution(bookings);
 }
 

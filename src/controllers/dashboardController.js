@@ -1,8 +1,7 @@
 const { pool } = require('../config/database');
-const { db } = require('../config/firebase');
 
 /**
- * Normalizes different date formats from Firebase
+ * Normalizes different date formats from Firebase or MySQL
  */
 const normalizeDate = (value) => {
     if (!value) return new Date();
@@ -19,10 +18,7 @@ const normalizeDate = (value) => {
  */
 exports.getDashboardStats = async (req, res) => {
     try {
-        const snapshot = await db.collection('bookings').get();
-        const bookings = [];
-        snapshot.forEach(doc => bookings.push({ id: doc.id, ...doc.data() }));
-
+        const [bookings] = await pool.query('SELECT * FROM form_bookings ORDER BY created_at DESC');
         const totalBookings = bookings.length;
 
         // Calculate estimated revenue
@@ -65,9 +61,7 @@ exports.getDashboardStats = async (req, res) => {
  */
 exports.getKPIs = async (req, res) => {
     try {
-        const snapshot = await db.collection('bookings').get();
-        const bookings = [];
-        snapshot.forEach(doc => bookings.push({ id: doc.id, ...doc.data() }));
+        const [bookings] = await pool.query('SELECT * FROM form_bookings ORDER BY created_at DESC');
 
         const now = new Date();
         const currentMonth = now.getMonth();
