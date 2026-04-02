@@ -621,7 +621,7 @@ const getRecentActivity = async (req, res) => {
              JOIN reservations r ON l.reservation_id = r.id
              ORDER BY l.created_at DESC
              LIMIT ?`,
-            [limit]
+            limit
         );
 
         return successResponse(res, 200, 'Recent activity retrieved', logs);
