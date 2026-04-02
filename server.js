@@ -217,11 +217,20 @@ const startServer = async () => {
                 console.warn('💡 Server will continue starting. Migrations can be run later.');
             }
 
+            // Proactively ensure roles are up to date (safety net)
+            try {
+                await User.updateRoles();
+            } catch (roleError) {
+                console.warn('⚠️  Could not verify user roles:', roleError.message);
+            }
+
             // Create legacy tables if migrations didn't run
             if (!migrationSuccess) {
                 console.log('🔄 Creating legacy tables...');
                 try {
                     await User.createTable();
+                    await User.addMissingColumns();
+                    await User.updateRoles();
                     await User.createRefreshTokensTable();
 
                     // Create WhatsApp/Lead tables
