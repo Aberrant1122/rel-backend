@@ -79,7 +79,7 @@ const updateReservationValidation = [
     
     body('reservation_status')
         .optional()
-        .isIn(['pending', 'assigned', 'in_progress', 'completed', 'cancelled'])
+        .isIn(['pending', 'assigned', 'confirmed', 'in_progress', 'completed', 'cancelled', 'rejected'])
         .withMessage('Invalid reservation status'),
     
     body('payment_status')
@@ -103,7 +103,7 @@ const listReservationsValidation = [
     
     query('status')
         .optional()
-        .isIn(['pending', 'assigned', 'in_progress', 'completed', 'cancelled'])
+        .isIn(['pending', 'assigned', 'confirmed', 'in_progress', 'completed', 'cancelled', 'rejected'])
         .withMessage('Invalid status filter'),
     
     query('booking_type')

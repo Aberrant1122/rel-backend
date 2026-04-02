@@ -60,6 +60,13 @@ reservationRoutes.get(
     reservationController.getPassengerReservations
 );
 
+// Driver specific routes
+reservationRoutes.get(
+    '/driver/trips',
+    roleMiddleware('driver'),
+    reservationController.getDriverReservations
+);
+
 // Action routes
 reservationRoutes.post(
     '/:id/assign-driver',
@@ -73,10 +80,29 @@ reservationRoutes.patch(
     reservationController.updateStatus
 );
 
+reservationRoutes.get(
+    '/:id/status-logs',
+    roleMiddleware('admin', 'team', 'driver'),
+    reservationController.getStatusLogs
+);
+
+reservationRoutes.get(
+    '/activity/recent',
+    roleMiddleware('admin', 'team'),
+    reservationController.getRecentActivity
+);
+
 reservationRoutes.post(
     '/:id/cancel',
     roleMiddleware('admin', 'team', 'passenger'),
     reservationController.cancelReservation
 );
+
+reservationRoutes.delete(
+    '/:id',
+    roleMiddleware('admin'),
+    reservationController.deleteReservation
+);
+
 reservationRoutes.get('/drivers/available', reservationController.getAvailableDrivers);
 module.exports = reservationRoutes;

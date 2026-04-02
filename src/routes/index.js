@@ -15,6 +15,8 @@ const formsRoutes = require('./formsRoutes');
 const attendanceRoutes = require('./attendanceRoutes');
 const notificationsRoutes = require('./notificationsRoutes');
 const reservationRoutes = require('./reservationRoutes');
+const driverRoutes = require('./driverRoutes');
+const dispatchRoutes = require('./dispatchRoutes');
 
 // Mount auth routes (includes Google OAuth)
 router.use('/auth', authRoutes);
@@ -29,6 +31,8 @@ router.use('/gmail', gmailRoutes);
 router.use('/forms', formsRoutes);
 router.use('/notifications', notificationsRoutes);
 router.use('/reservations', reservationRoutes);
+router.use('/drivers', driverRoutes);
+router.use('/dispatch', dispatchRoutes);
 
 // Mount root path routes
 router.use('/', attendanceRoutes);

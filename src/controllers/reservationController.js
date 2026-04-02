@@ -1,6 +1,7 @@
 const { pool } = require('../config/database');
 const { successResponse, errorResponse, paginationResponse } = require('../utils/responseUtils');
 const { generateReservationNumber } = require('../utils/reservationNumberGenerator');
+const notificationsService = require('../services/notificationsService');
 
 // Create a new reservation
 const createReservation = async (req, res) => {
@@ -167,9 +168,11 @@ const getAllReservations = async (req, res) => {
 
         // Get data with pagination and filters
         const dataQuery = `
-            SELECT r.*, v.label as vehicle_type, v.slug as vehicle_code 
+            SELECT r.*, v.label as vehicle_type, v.slug as vehicle_code, u.name as driver_name 
             FROM reservations r
             LEFT JOIN vehicles v ON r.vehicle_type_id = v.id
+            LEFT JOIN drivers d ON r.assigned_driver_id = d.id
+            LEFT JOIN users u ON d.user_id = u.id
             ${whereClause}
             ORDER BY r.created_at DESC 
             LIMIT ${limit} OFFSET ${offset}
@@ -379,7 +382,7 @@ const assignDriver = async (req, res) => {
 
         // Check if driver exists and is available
         const [driver] = await connection.execute(
-            `SELECT d.id, d.status, u.name 
+            `SELECT d.id, d.status, u.id as user_id, u.name 
             FROM drivers d
             JOIN users u ON d.user_id = u.id
             WHERE d.id = ? AND d.status = 'available'`,
@@ -407,6 +410,21 @@ const assignDriver = async (req, res) => {
 
         await connection.commit();
 
+        // Create notification for driver
+        try {
+            await notificationsService.createNotification(
+                driver[0].user_id,
+                'trip_assigned',
+                'New Trip Assigned',
+                `You have been assigned a new trip: #${reservation[0].reservation_number || 'N/A'}. Please accept or reject it.`,
+                id,
+                'reservation'
+            );
+        } catch (notifError) {
+            console.error('Failed to create notification:', notifError);
+            // Don't fail the assignment if notification fails
+        }
+
         return successResponse(
             res,
             200,
@@ -433,9 +451,11 @@ const updateStatus = async (req, res) => {
     let connection;
     try {
         const { id } = req.params;
-        const { status } = req.body;
+        const { status, note } = req.body;
+        const changedBy = req.user.id;
+        const changedByRole = req.user.role;
 
-        const validStatuses = ['pending', 'assigned', 'in_progress', 'completed', 'cancelled'];
+        const validStatuses = ['pending', 'assigned', 'confirmed', 'in_progress', 'completed', 'cancelled', 'rejected', 'pending_driver_approval', 'driver_denied'];
         
         if (!status || !validStatuses.includes(status)) {
             return errorResponse(res, 400, 'Invalid status');
@@ -455,7 +475,6 @@ const updateStatus = async (req, res) => {
             return errorResponse(res, 404, 'Reservation not found');
         }
 
-        // Validate status transition
         const currentStatus = reservation[0].reservation_status;
         
         if (currentStatus === 'completed') {
@@ -469,30 +488,83 @@ const updateStatus = async (req, res) => {
         }
 
         // Update status
+        if (status === 'rejected') {
+            await connection.execute(
+                `UPDATE reservations 
+                SET reservation_status = 'pending', assigned_driver_id = NULL, updated_at = CURRENT_TIMESTAMP 
+                WHERE id = ?`,
+                [id]
+            );
+        } else {
+            await connection.execute(
+                `UPDATE reservations 
+                SET reservation_status = ?, updated_at = CURRENT_TIMESTAMP 
+                WHERE id = ?`,
+                [status, id]
+            );
+        }
+
+        // Free up driver on terminal statuses
+        if ((status === 'cancelled' || status === 'completed' || status === 'rejected' || status === 'driver_denied') && reservation[0].assigned_driver_id) {
+            await connection.execute(
+                `UPDATE drivers SET status = 'available' WHERE id = ?`,
+                [reservation[0].assigned_driver_id]
+            );
+        }
+
+        // Mark driver on_trip when trip starts or is confirmed/assigned
+        if ((status === 'in_progress' || status === 'confirmed' || status === 'assigned' || status === 'pending_driver_approval') && reservation[0].assigned_driver_id) {
+            await connection.execute(
+                `UPDATE drivers SET status = 'on_trip' WHERE id = ?`,
+                [reservation[0].assigned_driver_id]
+            );
+        }
+
+        // Write status log
+        const loggedStatus = status === 'rejected' ? 'pending' : status;
         await connection.execute(
-            `UPDATE reservations 
-            SET reservation_status = ?, updated_at = CURRENT_TIMESTAMP 
-            WHERE id = ?`,
-            [status, id]
+            `INSERT INTO trip_status_logs (reservation_id, changed_by, changed_by_role, from_status, to_status, note)
+             VALUES (?, ?, ?, ?, ?, ?)`,
+            [id, changedBy, changedByRole, currentStatus, loggedStatus, note || null]
         );
 
-        // If cancelling and driver assigned, free up the driver
-        if (status === 'cancelled' && reservation[0].assigned_driver_id) {
-            await connection.execute(
-                `UPDATE drivers SET status = 'available' WHERE id = ?`,
-                [reservation[0].assigned_driver_id]
-            );
-        }
-
-        // If completed, update driver status
-        if (status === 'completed' && reservation[0].assigned_driver_id) {
-            await connection.execute(
-                `UPDATE drivers SET status = 'available' WHERE id = ?`,
-                [reservation[0].assigned_driver_id]
-            );
-        }
-
         await connection.commit();
+
+        // Send notifications to admins/team on key driver actions
+        if (status === 'completed' || status === 'in_progress') {
+            try {
+                const [resDetails] = await pool.query(
+                    `SELECT r.reservation_number, r.passenger_name, u.name AS driver_name
+                     FROM reservations r
+                     LEFT JOIN drivers d ON r.assigned_driver_id = d.id
+                     LEFT JOIN users u ON d.user_id = u.id
+                     WHERE r.id = ?`,
+                    [id]
+                );
+                const detail = resDetails[0];
+                const driverName = detail?.driver_name || 'Driver';
+                const resNum    = detail?.reservation_number || `#${id}`;
+                const passenger = detail?.passenger_name || 'passenger';
+
+                const isCompleted = status === 'completed';
+                const notifType  = isCompleted ? 'trip_completed' : 'trip_started';
+                const notifTitle = isCompleted ? 'Trip Completed' : 'Trip Started';
+                const notifMsg   = isCompleted
+                    ? `${driverName} completed trip ${resNum} for ${passenger}.`
+                    : `${driverName} started trip ${resNum} and is on the way to pick up ${passenger}.`;
+
+                const [staffRows] = await pool.query(
+                    `SELECT id FROM users WHERE role IN ('admin', 'team') AND is_active = 1`
+                );
+                for (const staff of staffRows) {
+                    await notificationsService.createNotification(
+                        staff.id, notifType, notifTitle, notifMsg, id, 'reservation'
+                    );
+                }
+            } catch (notifErr) {
+                console.error('Notification failed (non-fatal):', notifErr.message);
+            }
+        }
 
         return successResponse(
             res,
@@ -505,6 +577,57 @@ const updateStatus = async (req, res) => {
         if (connection) await connection.rollback();
         console.error('Update status error:', error);
         return errorResponse(res, 500, 'Failed to update status', error.message);
+    } finally {
+        if (connection) connection.release();
+    }
+};
+
+// Get status logs for a reservation
+const getStatusLogs = async (req, res) => {
+    let connection;
+    try {
+        const { id } = req.params;
+        connection = await pool.getConnection();
+
+        const [logs] = await connection.execute(
+            `SELECT l.*, u.name as changed_by_name
+             FROM trip_status_logs l
+             JOIN users u ON l.changed_by = u.id
+             WHERE l.reservation_id = ?
+             ORDER BY l.created_at ASC`,
+            [id]
+        );
+
+        return successResponse(res, 200, 'Status logs retrieved', logs);
+    } catch (error) {
+        console.error('Get status logs error:', error);
+        return errorResponse(res, 500, 'Failed to retrieve status logs', error.message);
+    } finally {
+        if (connection) connection.release();
+    }
+};
+
+// Get recent trip activity across all reservations (for admin dashboard)
+const getRecentActivity = async (req, res) => {
+    let connection;
+    try {
+        const limit = parseInt(req.query.limit) || 10;
+        connection = await pool.getConnection();
+
+        const [logs] = await connection.execute(
+            `SELECT l.*, u.name as changed_by_name, r.reservation_number, r.passenger_name
+             FROM trip_status_logs l
+             JOIN users u ON l.changed_by = u.id
+             JOIN reservations r ON l.reservation_id = r.id
+             ORDER BY l.created_at DESC
+             LIMIT ?`,
+            [limit]
+        );
+
+        return successResponse(res, 200, 'Recent activity retrieved', logs);
+    } catch (error) {
+        console.error('Get recent activity error:', error);
+        return errorResponse(res, 500, 'Failed to retrieve recent activity', error.message);
     } finally {
         if (connection) connection.release();
     }
@@ -768,6 +891,89 @@ const getAvailableDrivers = async (req, res) => {
     }
 };
 
+const getDriverReservations = async (req, res) => {
+    let connection;
+    try {
+        const userId = req.user.id;
+        const page = parseInt(req.query.page) || 1;
+        const limit = parseInt(req.query.limit) || 10;
+        const offset = (page - 1) * limit;
+        const { status } = req.query;
+
+        connection = await pool.getConnection();
+
+        // Find the driver ID for this user
+        const [driverRows] = await connection.execute(
+            'SELECT id FROM drivers WHERE user_id = ?',
+            [userId]
+        );
+
+        if (driverRows.length === 0) {
+            return errorResponse(res, 404, 'Driver profile not found');
+        }
+
+        const driverId = driverRows[0].id;
+
+        // Build WHERE clause
+        let whereConditions = ['assigned_driver_id = ?'];
+        let queryParams = [driverId];
+
+        if (status) {
+            whereConditions.push('reservation_status = ?');
+            queryParams.push(status);
+        }
+
+        const whereClause = 'WHERE ' + whereConditions.join(' AND ');
+
+        // Get total count
+        const countQuery = `SELECT COUNT(*) as total FROM reservations ${whereClause}`;
+        const [countResult] = await connection.query(countQuery, queryParams);
+        const total = countResult[0].total;
+
+        // Get reservations
+        const dataQuery = `
+            SELECT r.*, v.label as vehicle_type, v.slug as vehicle_code 
+            FROM reservations r
+            LEFT JOIN vehicles v ON r.vehicle_type_id = v.id
+            ${whereClause}
+            ORDER BY r.pickup_date DESC, r.pickup_time DESC
+            LIMIT ${limit} OFFSET ${offset}
+        `;
+        const [reservations] = await connection.query(dataQuery, queryParams);
+
+        return paginationResponse(
+            res,
+            reservations,
+            total,
+            page,
+            limit,
+            'Driver trips retrieved successfully'
+        );
+    } catch (error) {
+        console.error('Get driver reservations error:', error);
+        return errorResponse(res, 500, 'Failed to retrieve driver trips', error.message);
+    } finally {
+        if (connection) connection.release();
+    }
+};
+
+const deleteReservation = async (req, res) => {
+    try {
+        const { id } = req.params;
+        const [rows] = await pool.query('SELECT id, reservation_status FROM reservations WHERE id = ?', [id]);
+
+        if (rows.length === 0) {
+            return errorResponse(res, 404, 'Reservation not found');
+        }
+
+        await pool.query('DELETE FROM reservations WHERE id = ?', [id]);
+        return successResponse(res, 200, 'Reservation deleted successfully');
+    } catch (error) {
+        console.error('Delete reservation error:', error);
+        return errorResponse(res, 500, 'Failed to delete reservation', error.message);
+    }
+};
+
 module.exports = {
     createReservation,
     getAllReservations,
@@ -775,9 +981,13 @@ module.exports = {
     updateReservation,
     assignDriver,
     updateStatus,
+    getStatusLogs,
+    getRecentActivity,
     cancelReservation,
+    deleteReservation,
     getPassengerReservations,
     getAvailableVehicles,
     getStats,
-    getAvailableDrivers
+    getAvailableDrivers,
+    getDriverReservations
 };
