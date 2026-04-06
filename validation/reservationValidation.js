@@ -110,6 +110,11 @@ const listReservationsValidation = [
         .optional()
         .isIn(['form', 'contract', 'manual'])
         .withMessage('Invalid booking type'),
+
+    query('payment_status')
+        .optional()
+        .isIn(['pending', 'paid', 'failed', 'refunded'])
+        .withMessage('Invalid payment status'),
     
     query('start_date')
         .optional()
