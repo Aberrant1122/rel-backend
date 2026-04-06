@@ -45,11 +45,11 @@ pool.on('connection', (connection) => {
 });
 
 pool.on('acquire', (connection) => {
-    console.log('📥 Connection %d acquired', connection.threadId);
+    // Suppress connection acquired logs
 });
 
 pool.on('release', (connection) => {
-    console.log('📤 Connection %d released', connection.threadId);
+    // Suppress connection released logs
 });
 
 // Test database connection
