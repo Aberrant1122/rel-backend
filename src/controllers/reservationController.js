@@ -133,7 +133,7 @@ const getAllReservations = async (req, res) => {
         const page = parseInt(req.query.page) || 1;
         const limit = parseInt(req.query.limit) || 10;
         const offset = (page - 1) * limit;
-        const { status, booking_type, search } = req.query;
+        const { status, booking_type, search, payment_status } = req.query;
 
         connection = await pool.getConnection();
 
@@ -149,6 +149,11 @@ const getAllReservations = async (req, res) => {
         if (booking_type) {
             whereConditions.push('booking_type = ?');
             queryParams.push(booking_type);
+        }
+
+        if (payment_status) {
+            whereConditions.push('payment_status = ?');
+            queryParams.push(payment_status);
         }
 
         if (search) {
