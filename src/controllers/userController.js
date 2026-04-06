@@ -123,6 +123,13 @@ const deleteUser = async (req, res) => {
             return errorResponse(res, 404, 'User not found');
         }
 
+        // Handle dependencies in reservations table
+        // 1. Nullify created_by references
+        await pool.query('UPDATE reservations SET created_by = NULL WHERE created_by = ?', [id]);
+        
+        // 2. Delete reservations where the user is the passenger (since passenger_id is NOT NULL)
+        await pool.query('DELETE FROM reservations WHERE passenger_id = ?', [id]);
+
         // Delete user
         const query = 'DELETE FROM users WHERE id = ?';
         await pool.query(query, [id]);
