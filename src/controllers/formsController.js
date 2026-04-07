@@ -68,6 +68,9 @@ const getRateConfig = async (req, res) => {
             if (typeof config.service_multipliers === 'string') {
                 config.service_multipliers = JSON.parse(config.service_multipliers);
             }
+            if (typeof config.enabled_service_types === 'string') {
+                config.enabled_service_types = JSON.parse(config.enabled_service_types);
+            }
             config.tax_rate = parseFloat(config.tax_rate || 0);
             config.cc_fee_rate = parseFloat(config.cc_fee_rate || 0);
             config.gratuity_rate = parseFloat(config.gratuity_rate || 0);
@@ -392,13 +395,13 @@ const upsertVehicle = async (req, res) => {
  */
 const updateRateConfig = async (req, res) => {
     try {
-        const { tax_rate, cc_fee_rate, gratuity_rate, service_multipliers } = req.body;
+        const { tax_rate, cc_fee_rate, gratuity_rate, service_multipliers, enabled_service_types } = req.body;
         
         await pool.query(`
             UPDATE form_rate_config SET 
-                tax_rate = ?, cc_fee_rate = ?, gratuity_rate = ?, service_multipliers = ?
+                tax_rate = ?, cc_fee_rate = ?, gratuity_rate = ?, service_multipliers = ?, enabled_service_types = ?
             WHERE id = 1
-        `, [tax_rate, cc_fee_rate, gratuity_rate, JSON.stringify(service_multipliers)]);
+        `, [tax_rate, cc_fee_rate, gratuity_rate, JSON.stringify(service_multipliers), JSON.stringify(enabled_service_types)]);
 
         res.json({ success: true, message: 'Rate config updated successfully' });
     } catch (error) {
