@@ -68,6 +68,9 @@ const getRateConfig = async (req, res) => {
             if (typeof config.service_multipliers === 'string') {
                 config.service_multipliers = JSON.parse(config.service_multipliers);
             }
+            if (typeof config.enabled_service_types === 'string') {
+                config.enabled_service_types = JSON.parse(config.enabled_service_types);
+            }
             config.tax_rate = parseFloat(config.tax_rate || 0);
             config.cc_fee_rate = parseFloat(config.cc_fee_rate || 0);
             config.gratuity_rate = parseFloat(config.gratuity_rate || 0);
@@ -83,13 +86,24 @@ const getRateConfig = async (req, res) => {
     }
 };
 
+/** Normalize payment_status for ENUM columns */
+function normalizePaymentStatus(value) {
+    const v = (value && String(value).toLowerCase()) || 'pending';
+    return ['pending', 'paid', 'failed', 'refunded'].includes(v) ? v : 'pending';
+}
+
 const submitBooking = async (req, res) => {
     try {
         const bookingData = req.body;
-        const bookingRef = `BR-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
+        // Must match Stripe Checkout client_reference_id (frontend sends booking_... id)
+        const bookingRef =
+            (bookingData.booking_ref && String(bookingData.booking_ref).trim()) ||
+            `BR-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
 
         // Helper function to extract correct price format
         const price = bookingData.total_amount ? parseFloat(bookingData.total_amount) : 0;
+        const paymentStatus = normalizePaymentStatus(bookingData.payment_status);
+        const bookingStatus = bookingData.status || 'pending';
         
         // 1. Find or create passenger in users table
         let passengerId;
@@ -108,7 +122,7 @@ const submitBooking = async (req, res) => {
 
         const metadata = bookingData.metadata || {};
         
-        // 2. Insert into the original form_bookings (for backwards compatibility if needed)
+        // 2. Insert into form_bookings (requires migration 032 for payment_status / stripe_session_id)
         const [formResult] = await pool.query(`
             INSERT INTO form_bookings (
                 booking_ref, service_class, event_type, hours, vehicle_type,
@@ -116,12 +130,13 @@ const submitBooking = async (req, res) => {
                 passengers, flight_number, notes, reference_code,
                 full_name, email, phone,
                 total_amount, tax_amount, gratuity_amount, cc_fee_amount,
-                raw_data
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                raw_data,
+                status, payment_status, stripe_session_id
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         `, [
-            bookingRef, 
-            bookingData.service_class, 
-            bookingData.event_type, 
+            bookingRef,
+            bookingData.service_class,
+            bookingData.event_type,
             parseInt(bookingData.hours) || null,
             bookingData.vehicle_type,
             bookingData.pickup_location,
@@ -139,7 +154,10 @@ const submitBooking = async (req, res) => {
             metadata.breakdown?.taxes || 0,
             metadata.breakdown?.gratuity || 0,
             metadata.breakdown?.ccFee || 0,
-            JSON.stringify(bookingData)
+            JSON.stringify(bookingData),
+            bookingStatus,
+            paymentStatus,
+            null
         ]);
 
         // 3. Insert into the main reservations table so it shows up in dashboard
@@ -159,8 +177,9 @@ const submitBooking = async (req, res) => {
                 passenger_id, passenger_name, passenger_email, passenger_phone,
                 pickup_location, dropoff_location, pickup_date, pickup_time,
                 vehicle_type_id, passenger_count,
-                price, payment_status, reservation_status
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                price, payment_status, reservation_status,
+                form_booking_ref
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         `, [
             reservationNumber,
             'form',
@@ -176,8 +195,9 @@ const submitBooking = async (req, res) => {
             vehicleTypeId,
             parseInt(bookingData.passengers) || 1,
             price,
-            'pending', // Default payment status
-            'pending'  // Default reservation status
+            paymentStatus,
+            'pending',
+            bookingRef
         ]);
 
         res.status(201).json({
@@ -188,6 +208,72 @@ const submitBooking = async (req, res) => {
     } catch (error) {
         console.error('Error submitting booking:', error);
         res.status(500).json({ success: false, message: 'Failed to submit booking', error: error.message });
+    }
+};
+
+/**
+ * Called by Next.js after Stripe Checkout success (verify session server-side there first).
+ * @route POST /api/forms/bookings/payment-confirm
+ * @access Public (optional Bearer FORMS_PAYMENT_SECRET or BOOKINGS_API_SECRET)
+ */
+const confirmBookingPayment = async (req, res) => {
+    try {
+        const secret = process.env.FORMS_PAYMENT_SECRET || process.env.BOOKINGS_API_SECRET;
+        if (secret) {
+            const auth = req.headers.authorization;
+            if (!auth || auth !== `Bearer ${secret}`) {
+                return res.status(401).json({ success: false, message: 'Unauthorized' });
+            }
+        }
+
+        const { booking_ref, stripe_session_id, payment_status } = req.body || {};
+        const ref = booking_ref && String(booking_ref).trim();
+        if (!ref) {
+            return res.status(400).json({ success: false, message: 'booking_ref is required' });
+        }
+        if (!stripe_session_id || String(stripe_session_id).length < 10) {
+            return res.status(400).json({ success: false, message: 'stripe_session_id is required' });
+        }
+
+        const payStatus = normalizePaymentStatus(payment_status || 'paid');
+        if (payStatus !== 'paid') {
+            return res.status(400).json({ success: false, message: 'Only payment_status paid is supported for confirm' });
+        }
+
+        const [formUpdate] = await pool.query(
+            `UPDATE form_bookings SET payment_status = ?, stripe_session_id = ?, updated_at = NOW() WHERE booking_ref = ?`,
+            [payStatus, String(stripe_session_id).trim(), ref]
+        );
+
+        if (formUpdate.affectedRows === 0) {
+            return res.status(404).json({
+                success: false,
+                message: 'No form_bookings row found for this booking_ref'
+            });
+        }
+
+        const [resUpdate] = await pool.query(
+            `UPDATE reservations SET payment_status = ? WHERE form_booking_ref = ?`,
+            [payStatus, ref]
+        );
+
+        return res.json({
+            success: true,
+            message: 'Payment recorded',
+            data: {
+                booking_ref: ref,
+                payment_status: payStatus,
+                form_bookings_updated: formUpdate.affectedRows,
+                reservations_updated: resUpdate.affectedRows
+            }
+        });
+    } catch (error) {
+        console.error('confirmBookingPayment:', error);
+        return res.status(500).json({
+            success: false,
+            message: 'Failed to confirm payment',
+            error: error.message
+        });
     }
 };
 
@@ -309,13 +395,13 @@ const upsertVehicle = async (req, res) => {
  */
 const updateRateConfig = async (req, res) => {
     try {
-        const { tax_rate, cc_fee_rate, gratuity_rate, service_multipliers } = req.body;
+        const { tax_rate, cc_fee_rate, gratuity_rate, service_multipliers, enabled_service_types } = req.body;
         
         await pool.query(`
             UPDATE form_rate_config SET 
-                tax_rate = ?, cc_fee_rate = ?, gratuity_rate = ?, service_multipliers = ?
+                tax_rate = ?, cc_fee_rate = ?, gratuity_rate = ?, service_multipliers = ?, enabled_service_types = ?
             WHERE id = 1
-        `, [tax_rate, cc_fee_rate, gratuity_rate, JSON.stringify(service_multipliers)]);
+        `, [tax_rate, cc_fee_rate, gratuity_rate, JSON.stringify(service_multipliers), JSON.stringify(enabled_service_types)]);
 
         res.json({ success: true, message: 'Rate config updated successfully' });
     } catch (error) {
@@ -330,6 +416,7 @@ module.exports = {
     getVehicles,
     getRateConfig,
     submitBooking,
+    confirmBookingPayment,
     upsertVehicle,
     updateRateConfig
 };
