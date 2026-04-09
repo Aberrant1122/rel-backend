@@ -410,6 +410,74 @@ const updateRateConfig = async (req, res) => {
     }
 };
 
+/**
+ * Admin: Delete Vehicle
+ */
+const deleteVehicle = async (req, res) => {
+    try {
+        const { id } = req.params;
+        
+        // Use a transaction to ensure data integrity
+        const connection = await pool.getConnection();
+        await connection.beginTransaction();
+        
+        try {
+            // Check if trips table exists first
+            const [tables] = await connection.query(`
+                SELECT COUNT(*) as count 
+                FROM information_schema.tables 
+                WHERE table_schema = DATABASE() 
+                AND table_name = 'trips'
+            `);
+            const tripsTableExists = tables[0].count > 0;
+
+            // Check if vehicle has any active references (reservations or trips)
+            let checkQuery = `SELECT (SELECT COUNT(*) FROM reservations WHERE vehicle_type_id = ?) as count`;
+            let checkParams = [id];
+
+            if (tripsTableExists) {
+                checkQuery = `
+                    SELECT 
+                        (SELECT COUNT(*) FROM reservations WHERE vehicle_type_id = ?) +
+                        (SELECT COUNT(*) FROM trips WHERE vehicle_id = ?) as count
+                `;
+                checkParams = [id, id];
+            }
+
+            const [activeRefs] = await connection.query(checkQuery, checkParams);
+
+            if (activeRefs?.[0]?.count > 0) {
+                // If referenced, perform a soft delete instead
+                await connection.query('UPDATE vehicles SET is_active = FALSE WHERE id = ?', [id]);
+                await connection.commit();
+                return res.json({ 
+                    success: true, 
+                    message: 'Vehicle is linked to existing data. It has been deactivated instead of permanently deleted.' 
+                });
+            }
+
+            // Otherwise, perform a hard delete (related tables will cascade delete via DB schema)
+            const [result] = await connection.query('DELETE FROM vehicles WHERE id = ?', [id]);
+            
+            await connection.commit();
+            
+            if (result.affectedRows === 0) {
+                return res.status(404).json({ success: false, message: 'Vehicle not found' });
+            }
+            
+            res.json({ success: true, message: 'Vehicle deleted successfully' });
+        } catch (error) {
+            await connection.rollback();
+            throw error;
+        } finally {
+            connection.release();
+        }
+    } catch (error) {
+        console.error('Error deleting vehicle:', error);
+        res.status(500).json({ success: false, message: 'Failed to delete vehicle', error: error.message });
+    }
+};
+
 module.exports = {
     getBookings,
     getBookingById,
@@ -418,5 +486,6 @@ module.exports = {
     submitBooking,
     confirmBookingPayment,
     upsertVehicle,
-    updateRateConfig
+    updateRateConfig,
+    deleteVehicle
 };

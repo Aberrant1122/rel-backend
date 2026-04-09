@@ -8,7 +8,8 @@ const {
     submitBooking,
     confirmBookingPayment,
     upsertVehicle,
-    updateRateConfig
+    updateRateConfig,
+    deleteVehicle
 } = require('../controllers/formsController');
 const protect = require('../middleware/authMiddleware');
 
@@ -24,6 +25,7 @@ router.get('/bookings', getBookings);
 router.get('/bookings/:id', getBookingById);
 router.post('/vehicles', upsertVehicle);
 router.put('/vehicles/:id', upsertVehicle);
+router.delete('/vehicles/:id', deleteVehicle);
 router.put('/rate-config', updateRateConfig);
 
 module.exports = router;
