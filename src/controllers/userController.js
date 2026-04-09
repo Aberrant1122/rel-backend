@@ -141,9 +141,77 @@ const deleteUser = async (req, res) => {
     }
 };
 
+/**
+ * Get all passengers (users with role 'user' or 'passenger')
+ * GET /users/passengers
+ */
+const getPassengers = async (req, res) => {
+    try {
+        const query = `
+            SELECT id, name, email, phone, role, created_at 
+            FROM users 
+            WHERE role IN ('user', 'passenger')
+            ORDER BY created_at DESC
+        `;
+        const [passengers] = await pool.query(query);
+
+        // Enhance with trip counts and basic stats
+        const [tripStats] = await pool.query(`
+            SELECT passenger_id, COUNT(*) as total_trips, SUM(price) as total_spent, MAX(pickup_date) as last_trip
+            FROM reservations 
+            GROUP BY passenger_id
+        `);
+
+        // Map stats to passengers
+        const enhancedPassengers = passengers.map(p => {
+            const stats = tripStats.find(s => s.passenger_id === p.id);
+            return {
+                ...p,
+                totalTrips: stats ? stats.total_trips : 0,
+                totalSpent: stats ? parseFloat(stats.total_spent || 0) : 0,
+                lastTripDate: stats ? stats.last_trip : null,
+                status: 'active' // Default status
+            };
+        });
+
+        return successResponse(res, 200, 'Passengers retrieved successfully', enhancedPassengers);
+    } catch (error) {
+        console.error('Get passengers error:', error);
+        return errorResponse(res, 500, 'Server error while fetching passengers');
+    }
+};
+
+/**
+ * Search passengers
+ * GET /users/passengers/search
+ */
+const searchPassengers = async (req, res) => {
+    try {
+        const { q } = req.query;
+        if (!q) return successResponse(res, 200, 'Search query empty', []);
+
+        const searchTerm = `%${q}%`;
+        const query = `
+            SELECT id, name, email, phone, role 
+            FROM users 
+            WHERE (role IN ('user', 'passenger'))
+            AND (name LIKE ? OR email LIKE ? OR phone LIKE ?)
+            LIMIT 20
+        `;
+        const [passengers] = await pool.query(query, [searchTerm, searchTerm, searchTerm]);
+
+        return successResponse(res, 200, 'Passengers found', passengers);
+    } catch (error) {
+        console.error('Search passengers error:', error);
+        return errorResponse(res, 500, 'Server error while searching passengers');
+    }
+};
+
 module.exports = {
     getAllUsers,
     createUser,
     updateProfile,
-    deleteUser
+    deleteUser,
+    getPassengers,
+    searchPassengers
 };
