@@ -110,6 +110,51 @@ const updateProfile = async (req, res) => {
 };
 
 /**
+ * Update user by ID
+ * PUT /users/:id
+ */
+const updateUserById = async (req, res) => {
+    try {
+        const { id } = req.params;
+        const { name, email, role, password } = req.body;
+
+        // Check if user exists
+        const user = await User.findById(id);
+        if (!user) {
+            return errorResponse(res, 404, 'User not found');
+        }
+
+        // Check if email is taken by someone else
+        if (email && email !== user.email) {
+            const existingUser = await User.findByEmail(email);
+            if (existingUser && existingUser.id !== parseInt(id)) {
+                return errorResponse(res, 409, 'Email is already taken');
+            }
+        }
+
+        const updateData = {};
+        if (name !== undefined) updateData.name = name;
+        if (email !== undefined) updateData.email = email;
+        if (role !== undefined) updateData.role = role;
+        if (password) {
+            updateData.password = await User.hashPassword(password);
+        }
+
+        if (Object.keys(updateData).length > 0) {
+            await User.update(id, updateData);
+        }
+
+        const updatedUser = await User.findById(id);
+        delete updatedUser.password;
+
+        return successResponse(res, 200, 'User updated successfully', { user: updatedUser });
+    } catch (error) {
+        console.error('Update user by ID error:', error);
+        return errorResponse(res, 500, 'Server error while updating user');
+    }
+};
+
+/**
  * Delete user
  * DELETE /users/:id
  */
@@ -213,5 +258,6 @@ module.exports = {
     updateProfile,
     deleteUser,
     getPassengers,
-    searchPassengers
+    searchPassengers,
+    updateUserById
 };
