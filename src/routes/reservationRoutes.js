@@ -98,6 +98,12 @@ reservationRoutes.post(
     reservationController.cancelReservation
 );
 
+reservationRoutes.post(
+    '/:id/send-invoice',
+    roleMiddleware('admin', 'team'),
+    reservationController.sendInvoiceManually
+);
+
 reservationRoutes.delete(
     '/:id',
     roleMiddleware('admin'),

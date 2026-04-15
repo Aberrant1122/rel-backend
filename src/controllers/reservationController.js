@@ -2,6 +2,7 @@ const { pool } = require('../config/database');
 const { successResponse, errorResponse, paginationResponse } = require('../utils/responseUtils');
 const { generateReservationNumber } = require('../utils/reservationNumberGenerator');
 const notificationsService = require('../services/notificationsService');
+const emailService = require('../services/emailService');
 
 // Create a new reservation
 const createReservation = async (req, res) => {
@@ -260,7 +261,7 @@ const updateReservation = async (req, res) => {
 
         // Check if reservation exists
         const [existing] = await connection.execute(
-            'SELECT id, reservation_status FROM reservations WHERE id = ?',
+            'SELECT id, reservation_status, payment_status FROM reservations WHERE id = ?',
             [id]
         );
 
@@ -339,6 +340,16 @@ const updateReservation = async (req, res) => {
             WHERE r.id = ?`,
             [id]
         );
+
+        // Check if payment_status just changed to 'paid'
+        const previousPaymentStatus = existing[0].payment_status;
+        const newPaymentStatus = updated[0].payment_status;
+        
+        if (previousPaymentStatus !== 'paid' && newPaymentStatus === 'paid') {
+            emailService.sendInvoiceEmail(updated[0]).catch(err => {
+                console.error('Non-blocking error sending invoice email:', err);
+            });
+        }
 
         return successResponse(
             res,
@@ -807,90 +818,51 @@ const getStats = async (req, res) => {
             [today]
         );
 
-        // Get counts by status
+        // Get reservations by status
         const [byStatus] = await connection.execute(
-            `SELECT 
-                reservation_status as status,
-                COUNT(*) as count
-            FROM reservations
-            GROUP BY reservation_status`
+            'SELECT reservation_status, COUNT(*) as count FROM reservations GROUP BY reservation_status'
         );
 
-        // Get counts by booking type
-        const [byType] = await connection.execute(
-            `SELECT 
-                booking_type as type,
-                COUNT(*) as count
-            FROM reservations
-            GROUP BY booking_type`
-        );
-
-        // Get recent reservations (last 5)
+        // Get recent activity
         const [recent] = await connection.execute(
-            `SELECT 
-                r.id, r.reservation_number, r.passenger_name,
-                r.pickup_date, r.pickup_time, r.reservation_status,
-                v.label as vehicle_type
-            FROM reservations r
-            LEFT JOIN vehicles v ON r.vehicle_type_id = v.id
-            ORDER BY r.created_at DESC
-            LIMIT 5`
+            `SELECT r.id, r.reservation_number, r.passenger_name, r.pickup_date, r.reservation_status, v.label as vehicle_type 
+             FROM reservations r
+             LEFT JOIN vehicles v ON r.vehicle_type_id = v.id
+             ORDER BY r.created_at DESC LIMIT 5`
         );
 
-        return successResponse(
-            res,
-            200,
-            'Statistics retrieved successfully',
-            {
-                total: total[0]?.count || 0,
-                today: todayRes[0]?.count || 0,
-                by_status: byStatus || [],
-                by_type: byType || [],
-                recent: recent || []
-            }
-        );
+        return successResponse(res, 200, 'Stats retrieved successfully', {
+            total: total[0].count,
+            today: todayRes[0].count,
+            byStatus,
+            recent
+        });
 
     } catch (error) {
         console.error('Get stats error:', error);
-        return errorResponse(res, 500, 'Failed to retrieve statistics', error.message);
+        return errorResponse(res, 500, 'Failed to retrieve stats', error.message);
     } finally {
         if (connection) connection.release();
     }
 };
-const getAvailableDrivers = async (req, res) => {
+
+const deleteReservation = async (req, res) => {
     let connection;
     try {
+        const { id } = req.params;
+
         connection = await pool.getConnection();
+        const [result] = await connection.execute('DELETE FROM reservations WHERE id = ?', [id]);
 
-        const [drivers] = await connection.execute(`
-            SELECT 
-                d.id,
-                d.user_id,
-                u.name,
-                u.email,
-                u.phone,
-                d.license_number,
-                d.status,
-                d.vehicle_id,
-                v.label as vehicle_type,
-                v.slug as vehicle_code
-            FROM drivers d
-            JOIN users u ON d.user_id = u.id
-            LEFT JOIN vehicles v ON d.vehicle_id = v.id
-            WHERE d.status = 'available'
-            ORDER BY u.name
-        `);
+        if (result.affectedRows === 0) {
+            return errorResponse(res, 404, 'Reservation not found');
+        }
 
-        return successResponse(
-            res,
-            200,
-            'Available drivers retrieved successfully',
-            drivers
-        );
+        return successResponse(res, 200, 'Reservation deleted successfully');
 
     } catch (error) {
-        console.error('Get available drivers error:', error);
-        return errorResponse(res, 500, 'Failed to retrieve drivers', error.message);
+        console.error('Delete reservation error:', error);
+        return errorResponse(res, 500, 'Failed to delete reservation', error.message);
     } finally {
         if (connection) connection.release();
     }
@@ -899,83 +871,98 @@ const getAvailableDrivers = async (req, res) => {
 const getDriverReservations = async (req, res) => {
     let connection;
     try {
-        const userId = req.user.id;
+        // Assuming driver ID is attached to req.user.id or similar logic based on your auth
+        const driver_id = req.user.driver_id; 
         const page = parseInt(req.query.page) || 1;
         const limit = parseInt(req.query.limit) || 10;
         const offset = (page - 1) * limit;
-        const { status } = req.query;
 
         connection = await pool.getConnection();
 
-        // Find the driver ID for this user
-        const [driverRows] = await connection.execute(
-            'SELECT id FROM drivers WHERE user_id = ?',
-            [userId]
+        const [countResult] = await connection.execute(
+            'SELECT COUNT(*) as total FROM reservations WHERE assigned_driver_id = ?',
+            [driver_id]
         );
-
-        if (driverRows.length === 0) {
-            return errorResponse(res, 404, 'Driver profile not found');
-        }
-
-        const driverId = driverRows[0].id;
-
-        // Build WHERE clause
-        let whereConditions = ['assigned_driver_id = ?'];
-        let queryParams = [driverId];
-
-        if (status) {
-            whereConditions.push('reservation_status = ?');
-            queryParams.push(status);
-        }
-
-        const whereClause = 'WHERE ' + whereConditions.join(' AND ');
-
-        // Get total count
-        const countQuery = `SELECT COUNT(*) as total FROM reservations ${whereClause}`;
-        const [countResult] = await connection.query(countQuery, queryParams);
         const total = countResult[0].total;
 
-        // Get reservations
-        const dataQuery = `
-            SELECT r.*, v.label as vehicle_type, v.slug as vehicle_code 
-            FROM reservations r
-            LEFT JOIN vehicles v ON r.vehicle_type_id = v.id
-            ${whereClause}
-            ORDER BY r.pickup_date DESC, r.pickup_time DESC
-            LIMIT ${limit} OFFSET ${offset}
-        `;
-        const [reservations] = await connection.query(dataQuery, queryParams);
-
-        return paginationResponse(
-            res,
-            reservations,
-            total,
-            page,
-            limit,
-            'Driver trips retrieved successfully'
+        const [reservations] = await connection.execute(
+            `SELECT r.*, v.label as vehicle_type, v.slug as vehicle_code 
+             FROM reservations r
+             LEFT JOIN vehicles v ON r.vehicle_type_id = v.id
+             WHERE r.assigned_driver_id = ?
+             ORDER BY r.pickup_date DESC, r.pickup_time DESC
+             LIMIT ? OFFSET ?`,
+            [driver_id, limit, offset]
         );
+
+        return paginationResponse(res, reservations, total, page, limit, 'Driver reservations retrieved successfully');
+
     } catch (error) {
         console.error('Get driver reservations error:', error);
-        return errorResponse(res, 500, 'Failed to retrieve driver trips', error.message);
+        return errorResponse(res, 500, 'Failed to retrieve driver reservations', error.message);
     } finally {
         if (connection) connection.release();
     }
 };
 
-const deleteReservation = async (req, res) => {
+const getAvailableDrivers = async (req, res) => {
+    let connection;
+    try {
+        connection = await pool.getConnection();
+
+        const [drivers] = await connection.execute(
+            `SELECT d.id, d.status, u.name, u.email, u.phone 
+             FROM drivers d
+             JOIN users u ON d.user_id = u.id
+             WHERE d.status = 'available'`
+        );
+
+        return successResponse(res, 200, 'Available drivers retrieved successfully', drivers);
+
+    } catch (error) {
+        console.error('Get available drivers error:', error);
+        return errorResponse(res, 500, 'Failed to retrieve available drivers', error.message);
+    } finally {
+        if (connection) connection.release();
+    }
+};
+
+const sendInvoiceManually = async (req, res) => {
+    let connection;
     try {
         const { id } = req.params;
-        const [rows] = await pool.query('SELECT id, reservation_status FROM reservations WHERE id = ?', [id]);
+        connection = await pool.getConnection();
+        
+        const [reservationQuery] = await connection.execute(
+            `SELECT r.*, v.label as vehicle_type, v.slug as vehicle_code 
+            FROM reservations r
+            LEFT JOIN vehicles v ON r.vehicle_type_id = v.id
+            WHERE r.id = ?`,
+            [id]
+        );
 
-        if (rows.length === 0) {
+        if (reservationQuery.length === 0) {
             return errorResponse(res, 404, 'Reservation not found');
         }
 
-        await pool.query('DELETE FROM reservations WHERE id = ?', [id]);
-        return successResponse(res, 200, 'Reservation deleted successfully');
+        const reservation = reservationQuery[0];
+        
+        if (reservation.payment_status !== 'paid') {
+            return errorResponse(res, 400, 'Reservation is not marked as paid. Cannot send invoice.');
+        }
+
+        const success = await emailService.sendInvoiceEmail(reservation);
+        
+        if (success) {
+            return successResponse(res, 200, 'Invoice sent successfully');
+        } else {
+            return errorResponse(res, 500, 'Failed to send invoice email');
+        }
     } catch (error) {
-        console.error('Delete reservation error:', error);
-        return errorResponse(res, 500, 'Failed to delete reservation', error.message);
+        console.error('Send invoice error:', error);
+        return errorResponse(res, 500, 'Error while triggering invoice', error.message);
+    } finally {
+        if (connection) connection.release();
     }
 };
 
@@ -989,10 +976,11 @@ module.exports = {
     getStatusLogs,
     getRecentActivity,
     cancelReservation,
-    deleteReservation,
     getPassengerReservations,
     getAvailableVehicles,
     getStats,
+    deleteReservation,
+    getDriverReservations,
     getAvailableDrivers,
-    getDriverReservations
+    sendInvoiceManually
 };
