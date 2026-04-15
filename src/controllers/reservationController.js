@@ -818,29 +818,52 @@ const getStats = async (req, res) => {
             [today]
         );
 
-        // Get reservations by status
+        // Get counts by status
         const [byStatus] = await connection.execute(
-            'SELECT reservation_status, COUNT(*) as count FROM reservations GROUP BY reservation_status'
+            `SELECT 
+                reservation_status as status,
+                COUNT(*) as count
+            FROM reservations
+            GROUP BY reservation_status`
         );
 
-        // Get recent activity
+        // Get counts by booking type
+        const [byType] = await connection.execute(
+            `SELECT 
+                booking_type as type,
+                COUNT(*) as count
+            FROM reservations
+            GROUP BY booking_type`
+        );
+
+        // Get recent reservations (last 5)
         const [recent] = await connection.execute(
-            `SELECT r.id, r.reservation_number, r.passenger_name, r.pickup_date, r.reservation_status, v.label as vehicle_type 
-             FROM reservations r
-             LEFT JOIN vehicles v ON r.vehicle_type_id = v.id
-             ORDER BY r.created_at DESC LIMIT 5`
+            `SELECT 
+                r.id, r.reservation_number, r.passenger_name,
+                r.pickup_date, r.pickup_time, r.reservation_status,
+                v.label as vehicle_type
+            FROM reservations r
+            LEFT JOIN vehicles v ON r.vehicle_type_id = v.id
+            ORDER BY r.created_at DESC
+            LIMIT 5`
         );
 
-        return successResponse(res, 200, 'Stats retrieved successfully', {
-            total: total[0].count,
-            today: todayRes[0].count,
-            byStatus,
-            recent
-        });
+        return successResponse(
+            res,
+            200,
+            'Statistics retrieved successfully',
+            {
+                total: total[0]?.count || 0,
+                today: todayRes[0]?.count || 0,
+                by_status: byStatus || [],
+                by_type: byType || [],
+                recent: recent || []
+            }
+        );
 
     } catch (error) {
         console.error('Get stats error:', error);
-        return errorResponse(res, 500, 'Failed to retrieve stats', error.message);
+        return errorResponse(res, 500, 'Failed to retrieve statistics', error.message);
     } finally {
         if (connection) connection.release();
     }
