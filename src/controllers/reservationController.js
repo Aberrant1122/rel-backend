@@ -37,13 +37,13 @@ const createReservation = async (req, res) => {
 
         // Check if passenger exists - if not, create one
         let actualPassengerId = passenger_id;
-        
+
         if (!actualPassengerId || actualPassengerId === 0) {
             const [existingPassenger] = await connection.execute(
                 'SELECT id FROM users WHERE email = ?',
                 [passenger_email]
             );
-            
+
             if (existingPassenger.length > 0) {
                 actualPassengerId = existingPassenger[0].id;
             } else {
@@ -58,7 +58,7 @@ const createReservation = async (req, res) => {
                 'SELECT id FROM users WHERE id = ?',
                 [actualPassengerId]
             );
-            
+
             if (passenger.length === 0) {
                 await connection.rollback();
                 return errorResponse(res, 404, 'Passenger not found');
@@ -163,8 +163,8 @@ const getAllReservations = async (req, res) => {
             queryParams.push(searchTerm, searchTerm, searchTerm, searchTerm);
         }
 
-        const whereClause = whereConditions.length > 0 
-            ? 'WHERE ' + whereConditions.join(' AND ') 
+        const whereClause = whereConditions.length > 0
+            ? 'WHERE ' + whereConditions.join(' AND ')
             : '';
 
         // Get total count with filters
@@ -278,10 +278,10 @@ const updateReservation = async (req, res) => {
 
         // Format date fields properly
         let formattedUpdates = { ...updates };
-        
+
         // Handle date fields - convert empty string to null
         const dateFields = ['pickup_date', 'contract_start_date', 'contract_end_date'];
-        
+
         for (const field of dateFields) {
             if (formattedUpdates[field] !== undefined) {
                 if (formattedUpdates[field] === '' || formattedUpdates[field] === null) {
@@ -322,12 +322,12 @@ const updateReservation = async (req, res) => {
 
         // Add updated_at timestamp
         updateFields.push('updated_at = CURRENT_TIMESTAMP');
-        
+
         // Add id to values array
         updateValues.push(id);
 
         const updateQuery = `UPDATE reservations SET ${updateFields.join(', ')} WHERE id = ?`;
-        
+
         await connection.execute(updateQuery, updateValues);
 
         await connection.commit();
@@ -344,7 +344,7 @@ const updateReservation = async (req, res) => {
         // Check if payment_status just changed to 'paid'
         const previousPaymentStatus = existing[0].payment_status;
         const newPaymentStatus = updated[0].payment_status;
-        
+
         if (previousPaymentStatus !== 'paid' && newPaymentStatus === 'paid') {
             emailService.sendInvoiceEmail(updated[0]).catch(err => {
                 console.error('Non-blocking error sending invoice email:', err);
@@ -472,7 +472,7 @@ const updateStatus = async (req, res) => {
         const changedByRole = req.user.role;
 
         const validStatuses = ['pending', 'assigned', 'confirmed', 'in_progress', 'completed', 'cancelled', 'rejected', 'pending_driver_approval', 'driver_denied'];
-        
+
         if (!status || !validStatuses.includes(status)) {
             return errorResponse(res, 400, 'Invalid status');
         }
@@ -492,7 +492,7 @@ const updateStatus = async (req, res) => {
         }
 
         const currentStatus = reservation[0].reservation_status;
-        
+
         if (currentStatus === 'completed') {
             await connection.rollback();
             return errorResponse(res, 400, 'Cannot change status of completed reservation');
@@ -559,13 +559,13 @@ const updateStatus = async (req, res) => {
                 );
                 const detail = resDetails[0];
                 const driverName = detail?.driver_name || 'Driver';
-                const resNum    = detail?.reservation_number || `#${id}`;
+                const resNum = detail?.reservation_number || `#${id}`;
                 const passenger = detail?.passenger_name || 'passenger';
 
                 const isCompleted = status === 'completed';
-                const notifType  = isCompleted ? 'trip_completed' : 'trip_started';
+                const notifType = isCompleted ? 'trip_completed' : 'trip_started';
                 const notifTitle = isCompleted ? 'Trip Completed' : 'Trip Started';
-                const notifMsg   = isCompleted
+                const notifMsg = isCompleted
                     ? `${driverName} completed trip ${resNum} for ${passenger}.`
                     : `${driverName} started trip ${resNum} and is on the way to pick up ${passenger}.`;
 
@@ -637,7 +637,7 @@ const getRecentActivity = async (req, res) => {
              JOIN reservations r ON l.reservation_id = r.id
              ORDER BY l.created_at DESC
              LIMIT ?`,
-            limit
+            [limit]
         );
 
         return successResponse(res, 200, 'Recent activity retrieved', logs);
@@ -660,13 +660,25 @@ const cancelReservation = async (req, res) => {
 
         // Check if reservation exists
         const [reservation] = await connection.execute(
-            'SELECT id, reservation_status, assigned_driver_id FROM reservations WHERE id = ?',
+            'SELECT id, reservation_status, assigned_driver_id, form_booking_ref, pickup_date, pickup_time FROM reservations WHERE id = ?',
             [id]
         );
 
         if (reservation.length === 0) {
             await connection.rollback();
             return errorResponse(res, 404, 'Reservation not found');
+        }
+
+        // Enforce 48-hour cancellation policy
+        const pickupDate = reservation[0].pickup_date;
+        const pickupTime = reservation[0].pickup_time || '00:00';
+        const pickupDateTime = new Date(`${pickupDate.toISOString().split('T')[0]}T${pickupTime}`);
+        const now = new Date();
+        const diffInHours = (pickupDateTime - now) / (1000 * 60 * 60);
+
+        if (diffInHours < 48) {
+            await connection.rollback();
+            return errorResponse(res, 400, 'Cancellation Policy Violation: Reservations cannot be cancelled within 48 hours of pickup.');
         }
 
         if (reservation[0].reservation_status === 'completed') {
@@ -682,10 +694,18 @@ const cancelReservation = async (req, res) => {
         // Cancel reservation
         await connection.execute(
             `UPDATE reservations 
-            SET reservation_status = 'cancelled', updated_at = CURRENT_TIMESTAMP 
+            SET reservation_status = 'cancelled', payment_status = 'cancelled', updated_at = CURRENT_TIMESTAMP 
             WHERE id = ?`,
             [id]
         );
+
+        // If it's a form booking, also cancel the scheduled payment
+        if (reservation[0].form_booking_ref) {
+            await connection.execute(
+                "UPDATE form_bookings SET payment_status = 'cancelled' WHERE booking_ref = ?",
+                [reservation[0].form_booking_ref]
+            );
+        }
 
         // Free up driver if assigned
         if (reservation[0].assigned_driver_id) {
@@ -895,7 +915,7 @@ const getDriverReservations = async (req, res) => {
     let connection;
     try {
         // Assuming driver ID is attached to req.user.id or similar logic based on your auth
-        const driver_id = req.user.driver_id; 
+        const driver_id = req.user.driver_id;
         const page = parseInt(req.query.page) || 1;
         const limit = parseInt(req.query.limit) || 10;
         const offset = (page - 1) * limit;
@@ -955,7 +975,7 @@ const sendInvoiceManually = async (req, res) => {
     try {
         const { id } = req.params;
         connection = await pool.getConnection();
-        
+
         const [reservationQuery] = await connection.execute(
             `SELECT r.*, v.label as vehicle_type, v.slug as vehicle_code 
             FROM reservations r
@@ -969,13 +989,13 @@ const sendInvoiceManually = async (req, res) => {
         }
 
         const reservation = reservationQuery[0];
-        
+
         if (reservation.payment_status !== 'paid') {
             return errorResponse(res, 400, 'Reservation is not marked as paid. Cannot send invoice.');
         }
 
         const success = await emailService.sendInvoiceEmail(reservation);
-        
+
         if (success) {
             return successResponse(res, 200, 'Invoice sent successfully');
         } else {
@@ -986,6 +1006,34 @@ const sendInvoiceManually = async (req, res) => {
         return errorResponse(res, 500, 'Error while triggering invoice', error.message);
     } finally {
         if (connection) connection.release();
+    }
+};
+
+const deleteReservation = async (req, res) => {
+    try {
+        const { id } = req.params;
+        // 1. Get the booking reference before deleting
+        const [rows] = await pool.query('SELECT id, form_booking_ref FROM reservations WHERE id = ?', [id]);
+
+        if (rows.length === 0) {
+            return errorResponse(res, 404, 'Reservation not found');
+        }
+
+        const bookingRef = rows[0].form_booking_ref;
+
+        // 2. If it's a form booking with a saved card, cancel the scheduled payment
+        if (bookingRef) {
+            await pool.query("UPDATE form_bookings SET payment_status = 'cancelled' WHERE booking_ref = ?", [bookingRef]);
+            console.log(`Cancelled scheduled charge for deleted reservation: ${bookingRef}`);
+        }
+
+        // 3. Delete the reservation
+        await pool.query('DELETE FROM reservations WHERE id = ?', [id]);
+
+        return successResponse(res, 200, 'Reservation and its scheduled charges were deleted successfully');
+    } catch (error) {
+        console.error('Delete reservation error:', error);
+        return errorResponse(res, 500, 'Failed to delete reservation', error.message);
     }
 };
 

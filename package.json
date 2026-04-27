@@ -39,7 +39,9 @@
     "googleapis": "^169.0.0",
     "jsonwebtoken": "^9.0.2",
     "mysql2": "^3.6.5",
-    "nodemailer": "^8.0.5"
+    "node-cron": "^4.2.1",
+    "nodemailer": "^8.0.5",
+    "stripe": "^22.0.2"
   },
   "devDependencies": {
     "@types/cookie-parser": "^1.4.10",

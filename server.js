@@ -24,22 +24,22 @@ app.use(cors({
     origin: (origin, callback) => {
         // Allow requests with no origin (like mobile apps or curl)
         if (!origin) return callback(null, true);
-        
+
         const normalized = origin.replace(/\/$/, '');
-        
+
         // Check against allowed origins
         if (allowedOrigins.includes(normalized)) {
             return callback(null, true);
         }
-        
+
         // Allow *.railway.app and *.vercel.app in production
         if (process.env.NODE_ENV === 'production') {
-            if (normalized.match(/\.up\.railway\.app$/) || 
+            if (normalized.match(/\.up\.railway\.app$/) ||
                 normalized.match(/\.vercel\.app$/)) {
                 return callback(null, true);
             }
         }
-        
+
         console.log(`CORS blocked: ${origin} not in allowed origins:`, allowedOrigins);
         return callback(new Error('Not allowed by CORS'));
     },
@@ -47,6 +47,11 @@ app.use(cors({
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
     allowedHeaders: ['Content-Type', 'Authorization']
 }));
+
+// Stripe Webhook needs raw body before express.json()
+const stripeController = require('./src/controllers/stripeController');
+app.post('/api/stripe/webhook', express.raw({ type: 'application/json' }), stripeController.handleWebhook);
+
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 app.use(cookieParser());
@@ -284,6 +289,12 @@ const startServer = async () => {
             console.log(`🌐 Frontend URL: ${process.env.FRONTEND_URL || 'http://localhost:3000'}`);
             console.log(`📊 Database: ${dbConnected ? '✅ Connected' : '❌ Not Connected'}`);
             console.log(`📊 Migrations: ${migrationSuccess ? '✅ Completed' : '⚠️  Pending'}`);
+
+            // Start Charge Scheduler (checks for due payments daily)
+            const { startChargeScheduler } = require('./src/scheduler/chargeScheduler');
+            startChargeScheduler();
+            console.log(`⏰ Charge Scheduler: ✅ Enabled (runs daily at 00:00)`);
+
             console.log(`\n✅ Ready to accept requests\n`);
         });
 
@@ -303,7 +314,7 @@ startServer();
 // Graceful shutdown handling
 const gracefulShutdown = async (signal) => {
     console.log(`\n${signal} received. Starting graceful shutdown...`);
-    
+
     try {
         const { closePool } = require('./src/config/database');
         await closePool();

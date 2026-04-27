@@ -131,8 +131,8 @@ const submitBooking = async (req, res) => {
                 full_name, email, phone,
                 total_amount, tax_amount, gratuity_amount, cc_fee_amount,
                 raw_data,
-                status, payment_status, stripe_session_id
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                status, payment_status, stripe_session_id, passenger_id
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         `, [
             bookingRef,
             bookingData.service_class,
@@ -157,7 +157,8 @@ const submitBooking = async (req, res) => {
             JSON.stringify(bookingData),
             bookingStatus,
             paymentStatus,
-            null
+            null,
+            passengerId
         ]);
 
         // 3. Insert into the main reservations table so it shows up in dashboard

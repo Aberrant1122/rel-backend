@@ -83,11 +83,51 @@ const deleteNotification = async (notificationId, userId) => {
     return result.affectedRows > 0;
 };
 
+/**
+ * Send payment failure notification to admin and user
+ */
+const sendPaymentFailureNotification = async (bookingRef, errorMessage) => {
+    try {
+        // Find which user this booking belongs to
+        const [bookings] = await pool.query('SELECT passenger_id, full_name FROM form_bookings WHERE booking_ref = ?', [bookingRef]);
+        
+        if (bookings.length > 0) {
+            const { passenger_id, full_name } = bookings[0];
+            
+            // Notify the passenger
+            await createNotification(
+                passenger_id,
+                'payment_failed',
+                'Payment Failed',
+                `We were unable to process payment for your booking ${bookingRef}. Error: ${errorMessage}`,
+                bookingRef,
+                'booking'
+            );
+            
+            // Also notify admins (find admins)
+            const [admins] = await pool.query('SELECT id FROM users WHERE role = "admin"');
+            for (const admin of admins) {
+                await createNotification(
+                    admin.id,
+                    'admin_alert',
+                    'Payment Failure Alert',
+                    `Payment failed for booking ${bookingRef} (${full_name}). Error: ${errorMessage}`,
+                    bookingRef,
+                    'booking'
+                );
+            }
+        }
+    } catch (error) {
+        console.error('Error sending payment failure notification:', error);
+    }
+};
+
 module.exports = {
     createNotification,
     getNotifications,
     markAsRead,
     markAllAsRead,
-    deleteNotification
+    deleteNotification,
+    sendPaymentFailureNotification
 };
 
