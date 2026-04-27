@@ -889,28 +889,6 @@ const getStats = async (req, res) => {
     }
 };
 
-const deleteReservation = async (req, res) => {
-    let connection;
-    try {
-        const { id } = req.params;
-
-        connection = await pool.getConnection();
-        const [result] = await connection.execute('DELETE FROM reservations WHERE id = ?', [id]);
-
-        if (result.affectedRows === 0) {
-            return errorResponse(res, 404, 'Reservation not found');
-        }
-
-        return successResponse(res, 200, 'Reservation deleted successfully');
-
-    } catch (error) {
-        console.error('Delete reservation error:', error);
-        return errorResponse(res, 500, 'Failed to delete reservation', error.message);
-    } finally {
-        if (connection) connection.release();
-    }
-};
-
 const getDriverReservations = async (req, res) => {
     let connection;
     try {
