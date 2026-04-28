@@ -570,7 +570,7 @@ const updateStatus = async (req, res) => {
                     : `${driverName} started trip ${resNum} and is on the way to pick up ${passenger}.`;
 
                 const [staffRows] = await pool.query(
-                    `SELECT id FROM users WHERE role IN ('admin', 'team') AND is_active = 1`
+                    `SELECT id FROM users WHERE role IN ('admin', 'dispatcher') AND is_active = 1`
                 );
                 for (const staff of staffRows) {
                     await notificationsService.createNotification(

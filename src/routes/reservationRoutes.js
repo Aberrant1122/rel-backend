@@ -18,37 +18,37 @@ reservationRoutes.use(authMiddleware);
 // Public routes (accessible by all authenticated users)
 reservationRoutes.get('/vehicles', reservationController.getAvailableVehicles);
 
-// Stats route - Admin and Team only
+// Stats route - Admin and Dispatcher only
 reservationRoutes.get(
     '/stats',
-    roleMiddleware('admin', 'team'),
+    roleMiddleware('admin', 'dispatcher'),
     reservationController.getStats
 );
 
 // Reservation CRUD routes
 reservationRoutes.post(
     '/',
-    roleMiddleware('admin', 'team', 'passenger'),
+    roleMiddleware('admin', 'dispatcher', 'passenger'),
     createReservationValidation,
     reservationController.createReservation
 );
 
 reservationRoutes.get(
     '/',
-    roleMiddleware('admin', 'team'),
+    roleMiddleware('admin', 'dispatcher'),
     listReservationsValidation,
     reservationController.getAllReservations
 );
 
 reservationRoutes.get(
     '/:id',
-    roleMiddleware('admin', 'team', 'passenger', 'driver'),
+    roleMiddleware('admin', 'dispatcher', 'passenger', 'driver'),
     reservationController.getReservationById
 );
 
 reservationRoutes.put(
     '/:id',
-    roleMiddleware('admin', 'team'),
+    roleMiddleware('admin', 'dispatcher'),
     updateReservationValidation,
     reservationController.updateReservation
 );
@@ -56,7 +56,7 @@ reservationRoutes.put(
 // Passenger specific routes
 reservationRoutes.get(
     '/passenger/:passenger_id',
-    roleMiddleware('admin', 'team', 'passenger'),
+    roleMiddleware('admin', 'dispatcher', 'passenger'),
     reservationController.getPassengerReservations
 );
 
@@ -70,37 +70,37 @@ reservationRoutes.get(
 // Action routes
 reservationRoutes.post(
     '/:id/assign-driver',
-    roleMiddleware('admin', 'team'),
+    roleMiddleware('admin', 'dispatcher'),
     reservationController.assignDriver
 );
 
 reservationRoutes.patch(
     '/:id/status',
-    roleMiddleware('admin', 'team', 'driver'),
+    roleMiddleware('admin', 'dispatcher', 'driver'),
     reservationController.updateStatus
 );
 
 reservationRoutes.get(
     '/:id/status-logs',
-    roleMiddleware('admin', 'team', 'driver'),
+    roleMiddleware('admin', 'dispatcher', 'driver'),
     reservationController.getStatusLogs
 );
 
 reservationRoutes.get(
     '/activity/recent',
-    roleMiddleware('admin', 'team'),
+    roleMiddleware('admin', 'dispatcher'),
     reservationController.getRecentActivity
 );
 
 reservationRoutes.post(
     '/:id/cancel',
-    roleMiddleware('admin', 'team', 'passenger'),
+    roleMiddleware('admin', 'dispatcher', 'passenger'),
     reservationController.cancelReservation
 );
 
 reservationRoutes.post(
     '/:id/send-invoice',
-    roleMiddleware('admin', 'team'),
+    roleMiddleware('admin', 'dispatcher'),
     reservationController.sendInvoiceManually
 );
 

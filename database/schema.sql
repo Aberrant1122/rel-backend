@@ -46,7 +46,7 @@ CREATE TABLE IF NOT EXISTS refresh_tokens (
 --     first_name VARCHAR(100) NOT NULL,
 --     last_name VARCHAR(100) NOT NULL,
 --     phone VARCHAR(20),
---     role ENUM('admin', 'team', 'driver', 'passenger', 'affiliate') NOT NULL,
+--     role ENUM('admin', 'dispatcher', 'driver', 'passenger', 'affiliate') NOT NULL,
 --     is_active BOOLEAN DEFAULT true,
 --     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
 --     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
@@ -144,7 +144,7 @@ CREATE TABLE reservations (
 -- Insert sample data
 -- INSERT INTO users (email, password_hash, first_name, last_name, phone, role) VALUES
 -- ('admin@rel.com', '$2a$10$samplehash', 'Admin', 'User', '+1234567890', 'admin'),
--- ('team@rel.com', '$2a$10$samplehash', 'Team', 'Member', '+1234567891', 'team'),
+-- ('dispatcher@rel.com', '$2a$10$samplehash', 'Dispatcher', 'Member', '+1234567891', 'dispatcher'),
 -- ('john.doe@example.com', '$2a$10$samplehash', 'John', 'Doe', '+1234567892', 'passenger'),
 -- ('mike.smith@example.com', '$2a$10$samplehash', 'Mike', 'Smith', '+1234567893', 'driver');
 
