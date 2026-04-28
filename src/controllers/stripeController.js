@@ -73,6 +73,10 @@ const savePaymentMethod = async (req, res) => {
         // 1. Update form_bookings with Stripe IDs and initial status
         const initialStatus = (chargeLater || scheduledChargeDate) ? 'scheduled' : 'processing';
 
+        const isNumeric = !isNaN(bookingId) && !isNaN(parseFloat(bookingId));
+        const whereClause = isNumeric ? 'WHERE booking_ref = ? OR id = ?' : 'WHERE booking_ref = ?';
+        const whereParams = isNumeric ? [bookingId, bookingId] : [bookingId];
+
         await pool.query(`
             UPDATE form_bookings 
             SET 
@@ -80,14 +84,13 @@ const savePaymentMethod = async (req, res) => {
                 stripe_payment_method_id = ?,
                 payment_status = ?,
                 scheduled_charge_date = ?
-            WHERE booking_ref = ? OR id = ?
+            ${whereClause}
         `, [
             customerId,
             paymentMethodId,
             initialStatus,
             scheduledChargeDate || null,
-            bookingId,
-            bookingId
+            ...whereParams
         ]);
 
         // 2. Also update reservations table
@@ -117,11 +120,15 @@ const savePaymentMethod = async (req, res) => {
             const finalStatus = paymentIntent.status === 'succeeded' ? 'paid' : 'failed';
 
             // Update with PaymentIntent ID and status
+            const isNumeric = !isNaN(bookingId) && !isNaN(parseFloat(bookingId));
+            const whereClause = isNumeric ? 'WHERE booking_ref = ? OR id = ?' : 'WHERE booking_ref = ?';
+            const whereParams = isNumeric ? [bookingId, bookingId] : [bookingId];
+
             await pool.query(`
                 UPDATE form_bookings 
                 SET payment_intent_id = ?, payment_status = ?
-                WHERE booking_ref = ? OR id = ?
-            `, [paymentIntent.id, finalStatus, bookingId, bookingId]);
+                ${whereClause}
+            `, [paymentIntent.id, finalStatus, ...whereParams]);
 
             await pool.query(`
                 UPDATE reservations 
@@ -145,10 +152,14 @@ const savePaymentMethod = async (req, res) => {
         } catch (chargeError) {
             console.error('Immediate charge failed:', chargeError.message);
 
+            const isNumeric = !isNaN(bookingId) && !isNaN(parseFloat(bookingId));
+            const whereClause = isNumeric ? 'WHERE booking_ref = ? OR id = ?' : 'WHERE booking_ref = ?';
+            const whereParams = isNumeric ? [bookingId, bookingId] : [bookingId];
+
             await pool.query(`
                 UPDATE form_bookings SET payment_status = 'failed' 
-                WHERE booking_ref = ? OR id = ?
-            `, [bookingId, bookingId]);
+                ${whereClause}
+            `, [...whereParams]);
 
             await pool.query(`
                 UPDATE reservations SET payment_status = 'failed' 
@@ -314,11 +325,15 @@ const retryCharge = async (req, res) => {
         if (!bookingId) return res.status(400).json({ success: false, message: 'Booking ID is required' });
 
         // 1. Fetch booking details
+        const isNumeric = !isNaN(bookingId) && !isNaN(parseFloat(bookingId));
+        const whereClause = isNumeric ? 'WHERE booking_ref = ? OR id = ?' : 'WHERE booking_ref = ?';
+        const whereParams = isNumeric ? [bookingId, bookingId] : [bookingId];
+
         const [bookings] = await pool.query(`
             SELECT id, booking_ref, total_amount, stripe_customer_id, stripe_payment_method_id, charge_retry_count
             FROM form_bookings
-            WHERE booking_ref = ? OR id = ?
-        `, [bookingId, bookingId]);
+            ${whereClause}
+        `, whereParams);
 
         if (bookings.length === 0) return res.status(404).json({ success: false, message: 'Booking not found' });
         const booking = bookings[0];
