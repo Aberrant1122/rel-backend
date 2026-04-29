@@ -29,4 +29,17 @@ router.get('/retrieve-setup-intent', stripeController.retrieveSetupIntent);
  */
 router.post('/retry-charge', authMiddleware, stripeController.retryCharge);
 
+/**
+ * Route to manually trigger the daily/hourly scheduler processing.
+ */
+router.post('/trigger-scheduler', authMiddleware, async (req, res) => {
+    try {
+        const { processEligiblePayments } = require('../scheduler/chargeScheduler');
+        await processEligiblePayments();
+        res.json({ success: true, message: 'Scheduler triggered successfully' });
+    } catch (error) {
+        res.status(500).json({ success: false, message: 'Failed to trigger scheduler', error: error.message });
+    }
+});
+
 module.exports = router;

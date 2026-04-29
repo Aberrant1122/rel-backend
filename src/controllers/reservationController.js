@@ -219,13 +219,15 @@ const getReservationById = async (req, res) => {
                 u_driver.name as driver_name,
                 d.license_number, d.status as driver_status,
                 u_creator.name as created_by_name,
-                u_creator.email as created_by_email
+                u_creator.email as created_by_email,
+                fb.scheduled_charge_date
             FROM reservations r
             LEFT JOIN vehicles v ON r.vehicle_type_id = v.id
             LEFT JOIN vehicle_pricing vp ON v.id = vp.vehicle_id
             LEFT JOIN drivers d ON r.assigned_driver_id = d.id
             LEFT JOIN users u_driver ON d.user_id = u_driver.id
             LEFT JOIN users u_creator ON r.created_by = u_creator.id
+            LEFT JOIN form_bookings fb ON r.form_booking_ref = fb.booking_ref
             WHERE r.id = ?`,
             [id]
         );
@@ -630,7 +632,7 @@ const getRecentActivity = async (req, res) => {
         const limit = parseInt(req.query.limit) || 10;
         connection = await pool.getConnection();
 
-        const [logs] = await connection.execute(
+        const [logs] = await connection.query(
             `SELECT l.*, u.name as changed_by_name, r.reservation_number, r.passenger_name
              FROM trip_status_logs l
              JOIN users u ON l.changed_by = u.id
@@ -752,7 +754,7 @@ const getPassengerReservations = async (req, res) => {
         const total = countResult[0].total;
 
         // Get passenger reservations
-        const [reservations] = await connection.execute(
+        const [reservations] = await connection.query(
             `SELECT 
                 r.*,
                 v.label as vehicle_type, v.slug as vehicle_code,
@@ -857,7 +859,7 @@ const getStats = async (req, res) => {
         );
 
         // Get recent reservations (last 5)
-        const [recent] = await connection.execute(
+        const [recent] = await connection.query(
             `SELECT 
                 r.id, r.reservation_number, r.passenger_name,
                 r.pickup_date, r.pickup_time, r.reservation_status,
@@ -906,7 +908,7 @@ const getDriverReservations = async (req, res) => {
         );
         const total = countResult[0].total;
 
-        const [reservations] = await connection.execute(
+        const [reservations] = await connection.query(
             `SELECT r.*, v.label as vehicle_type, v.slug as vehicle_code 
              FROM reservations r
              LEFT JOIN vehicles v ON r.vehicle_type_id = v.id

@@ -8,28 +8,33 @@ const notificationsService = require('../services/notificationsService');
  * to process bookings that are due for payment.
  */
 const startChargeScheduler = () => {
-    // Run every day at midnight US Eastern Time (New York)
-    cron.schedule('0 0 * * *', async () => {
-        console.log(`[${new Date().toLocaleString('en-US', { timeZone: 'America/New_York' })}] 🕒 Starting daily scheduled charge processing (US/Eastern)...`);
+    // Run every hour to be more responsive to "same day" bookings or manual schedule adjustments
+    cron.schedule('0 * * * *', async () => {
+        const nyTime = new Date().toLocaleString('en-US', { timeZone: 'America/New_York' });
+        console.log(`[${nyTime}] 🕒 Starting hourly scheduled charge processing (US/Eastern)...`);
         try {
             await processEligiblePayments();
-            console.log(`[${new Date().toLocaleString('en-US', { timeZone: 'America/New_York' })}] ✅ Daily charge processing completed.`);
+            console.log(`[${nyTime}] ✅ Hourly charge processing completed.`);
         } catch (error) {
-            console.error(`[${new Date().toLocaleString('en-US', { timeZone: 'America/New_York' })}] ❌ Fatal error in scheduler:`, error.message);
+            console.error(`[${nyTime}] ❌ Fatal error in scheduler:`, error.message);
         }
     }, {
         scheduled: true,
         timezone: "America/New_York"
     });
 
-    console.log('⏰ Charge Scheduler initialized to run at 00:00 daily (US/Eastern Time).');
+    console.log('⏰ Charge Scheduler initialized to run EVERY HOUR (US/Eastern Time).');
 };
 
 /**
  * Find and process bookings with scheduled_charge_date <= today
  */
 const processEligiblePayments = async () => {
-    const today = new Date().toISOString().split('T')[0];
+    // Get date in New York timezone to match the cron schedule and business logic
+    const today = new Date().toLocaleDateString('en-CA', { timeZone: 'America/New_York' }); // YYYY-MM-DD
+    const nyTime = new Date().toLocaleString('en-US', { timeZone: 'America/New_York' });
+
+    console.log(`🔍 Checking for eligible payments due on or before ${today} (NY Time: ${nyTime})...`);
 
     // Find bookings that are:
     // 1. Scheduled or previously failed
@@ -40,13 +45,13 @@ const processEligiblePayments = async () => {
         SELECT id, booking_ref, total_amount, stripe_customer_id, stripe_payment_method_id, charge_retry_count
         FROM form_bookings
         WHERE payment_status IN ('scheduled', 'failed')
-          AND scheduled_charge_date <= ?
+          AND (scheduled_charge_date <= ? OR scheduled_charge_date IS NULL)
           AND stripe_customer_id IS NOT NULL
           AND stripe_payment_method_id IS NOT NULL
           AND charge_retry_count < 3
     `, [today]);
 
-    console.log(`🔍 Found ${bookings.length} eligible bookings due for payment on ${today}.`);
+    console.log(`🔍 Found ${bookings.length} eligible bookings due for payment.`);
 
     for (const booking of bookings) {
         try {
