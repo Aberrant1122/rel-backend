@@ -13,7 +13,7 @@ class User {
                 email VARCHAR(255) NOT NULL UNIQUE,
                 password VARCHAR(255) NOT NULL,
                 phone VARCHAR(20) NULL,
-                role ENUM('user', 'employee', 'admin', 'passenger', 'driver', 'affiliate') DEFAULT 'employee',
+                role ENUM('admin', 'driver', 'dispatcher') DEFAULT 'dispatcher',
                 is_active BOOLEAN DEFAULT true,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
@@ -87,13 +87,14 @@ class User {
             
             if (columns.length > 0) {
                 const columnType = columns[0].COLUMN_TYPE;
-                // Check if all roles are included
-                if (!columnType.includes("'passenger'") || !columnType.includes("'driver'")) {
-                    console.log('🔧 Updating role column to include all roles...');
+                // Check if column matches the expected 3-role enum
+                const expected = "enum('admin','driver','dispatcher')";
+                if (columnType.toLowerCase() !== expected) {
+                    console.log('🔧 Updating role column to admin/driver/dispatcher...');
                     await pool.execute(`
                         ALTER TABLE users 
-                        MODIFY COLUMN role ENUM('user', 'employee', 'admin', 'passenger', 'driver', 'affiliate') 
-                        DEFAULT 'employee'
+                        MODIFY COLUMN role ENUM('admin', 'driver', 'dispatcher') 
+                        DEFAULT 'dispatcher'
                     `);
                     console.log('✅ Role column updated successfully');
                 }
@@ -218,7 +219,7 @@ class User {
      * Update user role
      */
     static async updateRole(userId, newRole) {
-        const validRoles = ['user', 'employee', 'admin', 'passenger', 'driver', 'affiliate'];
+        const validRoles = ['admin', 'driver', 'dispatcher'];
         
         if (!validRoles.includes(newRole)) {
             throw new Error(`Invalid role: ${newRole}. Must be one of: ${validRoles.join(', ')}`);
