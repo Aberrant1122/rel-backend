@@ -2,6 +2,7 @@ const cron = require('node-cron');
 const { pool } = require('../config/database');
 const stripeService = require('../services/stripeService');
 const notificationsService = require('../services/notificationsService');
+const emailService = require('../services/emailService');
 
 /**
  * Scheduled job to run every day at midnight (00:00)
@@ -94,6 +95,29 @@ const processSinglePayment = async (booking) => {
         if (paymentIntent.status === 'succeeded') {
             console.log(`✅ Payment successful for ${booking.booking_ref}: ${paymentIntent.id}`);
             await updateBookingStatus(booking.booking_ref, 'paid');
+
+            // Send invoice email
+            const [rows] = await pool.query(
+                `SELECT fb.full_name, fb.email, fb.total_amount,
+                        r.reservation_number, r.pickup_location, r.dropoff_location, r.pickup_date, r.pickup_time
+                 FROM form_bookings fb
+                 LEFT JOIN reservations r ON r.form_booking_ref = fb.booking_ref
+                 WHERE fb.booking_ref = ?`,
+                [booking.booking_ref]
+            );
+            if (rows.length > 0) {
+                const b = rows[0];
+                emailService.sendInvoiceEmail({
+                    reservation_number: b.reservation_number || booking.booking_ref,
+                    passenger_name: b.full_name,
+                    passenger_email: b.email,
+                    pickup_date: b.pickup_date,
+                    pickup_time: b.pickup_time,
+                    pickup_location: b.pickup_location,
+                    dropoff_location: b.dropoff_location,
+                    price: b.total_amount
+                }).catch(err => console.error('Non-blocking error sending invoice email:', err));
+            }
         } else {
             console.warn(`⚠️ Payment ${paymentIntent.id} status: ${paymentIntent.status}`);
             // If it requires action (like 3DS), it will likely fail for off-session.

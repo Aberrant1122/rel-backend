@@ -1,7 +1,10 @@
 const User = require('../models/User');
-const { comparePassword } = require('../utils/passwordUtils');
+const { comparePassword, hashPassword } = require('../utils/passwordUtils');
 const { generateAccessToken, generateRefreshToken, verifyRefreshToken } = require('../utils/tokenUtils');
 const { successResponse, errorResponse } = require('../utils/responseUtils');
+const crypto = require('crypto');
+const emailService = require('../services/emailService');
+const { pool } = require('../config/database');
 
 /**
  * Register new user
@@ -164,10 +167,85 @@ const refreshToken = async (req, res) => {
     }
 };
 
+/**
+ * Forgot password — send reset link
+ * POST /auth/forgot-password
+ */
+const forgotPassword = async (req, res) => {
+    try {
+        const { email } = req.body;
+        if (!email) return errorResponse(res, 400, 'Email is required');
+
+        const user = await User.findByEmail(email);
+
+        // Always return success to avoid user enumeration
+        if (!user) {
+            return successResponse(res, 200, 'If that email exists, a reset link has been sent');
+        }
+
+        // Generate a secure random token
+        const token = crypto.randomBytes(32).toString('hex');
+        const expires = new Date(Date.now() + 60 * 60 * 1000); // 1 hour
+
+        await pool.query(
+            'UPDATE users SET password_reset_token = ?, password_reset_expires = ? WHERE id = ?',
+            [token, expires, user.id]
+        );
+
+        const resetUrl = `${process.env.FRONTEND_URL}/reset-password?token=${token}`;
+
+        await emailService.sendPasswordResetEmail({
+            email: user.email,
+            name: user.name,
+            resetUrl
+        });
+
+        return successResponse(res, 200, 'If that email exists, a reset link has been sent');
+    } catch (error) {
+        console.error('Forgot password error:', error);
+        return errorResponse(res, 500, 'Server error');
+    }
+};
+
+/**
+ * Reset password — validate token and set new password
+ * POST /auth/reset-password
+ */
+const resetPassword = async (req, res) => {
+    try {
+        const { token, password } = req.body;
+        if (!token || !password) return errorResponse(res, 400, 'Token and new password are required');
+
+        const [rows] = await pool.query(
+            'SELECT id FROM users WHERE password_reset_token = ? AND password_reset_expires > NOW()',
+            [token]
+        );
+
+        if (rows.length === 0) {
+            return errorResponse(res, 400, 'Reset token is invalid or has expired');
+        }
+
+        const userId = rows[0].id;
+        const hashed = await hashPassword(password);
+
+        await pool.query(
+            'UPDATE users SET password = ?, password_reset_token = NULL, password_reset_expires = NULL WHERE id = ?',
+            [hashed, userId]
+        );
+
+        return successResponse(res, 200, 'Password has been reset successfully');
+    } catch (error) {
+        console.error('Reset password error:', error);
+        return errorResponse(res, 500, 'Server error');
+    }
+};
+
 module.exports = {
     register,
     login,
     getMe,
     logout,
-    refreshToken
+    refreshToken,
+    forgotPassword,
+    resetPassword
 };

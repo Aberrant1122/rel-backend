@@ -112,6 +112,11 @@ const createReservation = async (req, res) => {
             [result.insertId]
         );
 
+        // Send booking confirmation email (non-blocking)
+        emailService.sendBookingConfirmationEmail(newReservation[0]).catch(err => {
+            console.error('Non-blocking error sending booking confirmation email:', err);
+        });
+
         return successResponse(
             res,
             201,
@@ -894,13 +899,23 @@ const getStats = async (req, res) => {
 const getDriverReservations = async (req, res) => {
     let connection;
     try {
-        // Assuming driver ID is attached to req.user.id or similar logic based on your auth
-        const driver_id = req.user.driver_id;
         const page = parseInt(req.query.page) || 1;
         const limit = parseInt(req.query.limit) || 10;
         const offset = (page - 1) * limit;
 
         connection = await pool.getConnection();
+
+        // Look up the driver record by the authenticated user's id
+        const [driverRows] = await connection.execute(
+            'SELECT id FROM drivers WHERE user_id = ?',
+            [req.user.id]
+        );
+
+        if (driverRows.length === 0) {
+            return errorResponse(res, 404, 'Driver profile not found for this user');
+        }
+
+        const driver_id = driverRows[0].id;
 
         const [countResult] = await connection.execute(
             'SELECT COUNT(*) as total FROM reservations WHERE assigned_driver_id = ?',

@@ -1,4 +1,5 @@
 const { pool } = require('../config/database');
+const emailService = require('../services/emailService');
 
 /**
  * Get all vehicles with pricing and service classes
@@ -201,6 +202,20 @@ const submitBooking = async (req, res) => {
             bookingRef
         ]);
 
+        // Send booking confirmation email (non-blocking)
+        emailService.sendBookingConfirmationEmail({
+            reservation_number: reservationNumber,
+            passenger_name: bookingData.full_name || 'Valued Customer',
+            passenger_email: bookingData.email,
+            pickup_date: bookingData.pickup_date,
+            pickup_time: bookingData.pickup_time,
+            pickup_location: bookingData.pickup_location,
+            dropoff_location: bookingData.dropoff_location,
+            price
+        }).catch(err => {
+            console.error('Non-blocking error sending booking confirmation email:', err);
+        });
+
         res.status(201).json({
             success: true,
             message: 'Booking submitted successfully',
@@ -257,6 +272,30 @@ const confirmBookingPayment = async (req, res) => {
             `UPDATE reservations SET payment_status = ? WHERE form_booking_ref = ?`,
             [payStatus, ref]
         );
+
+        // Send invoice email for paid booking (non-blocking)
+        const [bookingRow] = await pool.query(
+            `SELECT fb.*, r.reservation_number, r.pickup_location, r.dropoff_location, r.pickup_date, r.pickup_time
+             FROM form_bookings fb
+             LEFT JOIN reservations r ON r.form_booking_ref = fb.booking_ref
+             WHERE fb.booking_ref = ?`,
+            [ref]
+        );
+        if (bookingRow.length > 0) {
+            const b = bookingRow[0];
+            emailService.sendInvoiceEmail({
+                reservation_number: b.reservation_number || b.booking_ref,
+                passenger_name: b.full_name,
+                passenger_email: b.email,
+                pickup_date: b.pickup_date,
+                pickup_time: b.pickup_time,
+                pickup_location: b.pickup_location,
+                dropoff_location: b.dropoff_location,
+                price: b.total_amount
+            }).catch(err => {
+                console.error('Non-blocking error sending invoice email:', err);
+            });
+        }
 
         return res.json({
             success: true,

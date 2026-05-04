@@ -1,6 +1,7 @@
 const stripeService = require('../services/stripeService');
 const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY);
 const { pool } = require('../config/database');
+const emailService = require('../services/emailService');
 
 /**
  * Step 1: Create or Get Customer and return SetupIntent client_secret
@@ -137,6 +138,7 @@ const savePaymentMethod = async (req, res) => {
             `, [finalStatus, bookingId]);
 
             if (paymentIntent.status === 'succeeded') {
+                await sendInvoiceForBookingRef(bookingId);
                 return res.json({
                     success: true,
                     message: 'Payment method saved and charged successfully',
@@ -223,16 +225,50 @@ const handleWebhook = async (req, res) => {
 };
 
 /**
+ * Fetch reservation details and send invoice email for a given booking_ref
+ */
+const sendInvoiceForBookingRef = async (bookingRef) => {
+    try {
+        const [rows] = await pool.query(
+            `SELECT fb.full_name, fb.email, fb.total_amount,
+                    r.reservation_number, r.pickup_location, r.dropoff_location, r.pickup_date, r.pickup_time
+             FROM form_bookings fb
+             LEFT JOIN reservations r ON r.form_booking_ref = fb.booking_ref
+             WHERE fb.booking_ref = ?`,
+            [bookingRef]
+        );
+        if (rows.length > 0) {
+            const b = rows[0];
+            emailService.sendInvoiceEmail({
+                reservation_number: b.reservation_number || bookingRef,
+                passenger_name: b.full_name,
+                passenger_email: b.email,
+                pickup_date: b.pickup_date,
+                pickup_time: b.pickup_time,
+                pickup_location: b.pickup_location,
+                dropoff_location: b.dropoff_location,
+                price: b.total_amount
+            }).catch(err => console.error('Non-blocking error sending invoice email:', err));
+        }
+    } catch (err) {
+        console.error('sendInvoiceForBookingRef error:', err);
+    }
+};
+
+/**
  * Helper to update payment status based on PaymentIntent ID
  */
 const updatePaymentStatusByIntent = async (paymentIntentId, status) => {
-    // We need to find the booking_ref associated with this paymentIntentId
     const [bookings] = await pool.query('SELECT booking_ref FROM form_bookings WHERE payment_intent_id = ?', [paymentIntentId]);
 
     if (bookings.length > 0) {
         const bookingRef = bookings[0].booking_ref;
         await pool.query('UPDATE form_bookings SET payment_status = ?, updated_at = NOW() WHERE booking_ref = ?', [status, bookingRef]);
         await pool.query('UPDATE reservations SET payment_status = ? WHERE form_booking_ref = ?', [status, bookingRef]);
+
+        if (status === 'paid') {
+            await sendInvoiceForBookingRef(bookingRef);
+        }
     }
 };
 
@@ -358,6 +394,7 @@ const retryCharge = async (req, res) => {
         await pool.query('UPDATE reservations SET payment_status = ? WHERE form_booking_ref = ?', [status, booking.booking_ref]);
 
         if (paymentIntent.status === 'succeeded') {
+            await sendInvoiceForBookingRef(booking.booking_ref);
             res.json({ success: true, message: 'Payment successful', paymentIntentId: paymentIntent.id });
         } else {
             res.json({ success: false, message: `Payment ${paymentIntent.status}`, paymentIntentId: paymentIntent.id });
