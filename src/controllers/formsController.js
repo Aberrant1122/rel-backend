@@ -20,8 +20,9 @@ const getVehicles = async (req, res) => {
         const hasSortOrder = columns.length > 0;
         
         const [vehicles] = await pool.query(`
-            SELECT v.*, 
+            SELECT v.*,
                    vp.base_rate, vp.per_mile, vp.per_hour, vp.per_minute,
+                   vp.distance_tiers, vp.hourly_tiers,
                    GROUP_CONCAT(vsc.service_class) as service_classes
             FROM vehicles v
             LEFT JOIN vehicle_pricing vp ON v.id = vp.vehicle_id
@@ -42,7 +43,9 @@ const getVehicles = async (req, res) => {
             base_rate: v.base_rate !== null ? parseFloat(v.base_rate) : null,
             per_mile: v.per_mile !== null ? parseFloat(v.per_mile) : null,
             per_hour: v.per_hour !== null ? parseFloat(v.per_hour) : null,
-            per_minute: v.per_minute !== null ? parseFloat(v.per_minute) : null
+            per_minute: v.per_minute !== null ? parseFloat(v.per_minute) : null,
+            distance_tiers: typeof v.distance_tiers === 'string' ? JSON.parse(v.distance_tiers) : (v.distance_tiers || null),
+            hourly_tiers: typeof v.hourly_tiers === 'string' ? JSON.parse(v.hourly_tiers) : (v.hourly_tiers || null)
         }));
 
         res.json({
@@ -406,12 +409,18 @@ const upsertVehicle = async (req, res) => {
         // Update Pricing
         if (pricing) {
             await pool.query(`
-                INSERT INTO vehicle_pricing (vehicle_id, base_rate, per_mile, per_hour, per_minute)
-                VALUES (?, ?, ?, ?, ?)
-                ON DUPLICATE KEY UPDATE 
-                    base_rate = VALUES(base_rate), per_mile = VALUES(per_mile), 
-                    per_hour = VALUES(per_hour), per_minute = VALUES(per_minute)
-            `, [vehicleId, pricing.base_rate, pricing.per_mile, pricing.per_hour, pricing.per_minute]);
+                INSERT INTO vehicle_pricing (vehicle_id, base_rate, per_mile, per_hour, per_minute, distance_tiers, hourly_tiers)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                ON DUPLICATE KEY UPDATE
+                    base_rate = VALUES(base_rate), per_mile = VALUES(per_mile),
+                    per_hour = VALUES(per_hour), per_minute = VALUES(per_minute),
+                    distance_tiers = VALUES(distance_tiers), hourly_tiers = VALUES(hourly_tiers)
+            `, [
+                vehicleId,
+                pricing.base_rate, pricing.per_mile, pricing.per_hour, pricing.per_minute,
+                pricing.distance_tiers ? JSON.stringify(pricing.distance_tiers) : null,
+                pricing.hourly_tiers ? JSON.stringify(pricing.hourly_tiers) : null
+            ]);
         }
 
         // Update Service Classes
