@@ -1,4 +1,13 @@
-const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY);
+const _stripeKey = process.env.STRIPE_SECRET_KEY;
+if (!_stripeKey) {
+    console.warn('Warning: STRIPE_SECRET_KEY is not set. Stripe features will be unavailable.');
+}
+const stripe = _stripeKey ? require('stripe')(_stripeKey) : null;
+
+function requireStripe() {
+    if (!stripe) throw new Error('Stripe is not configured — STRIPE_SECRET_KEY is missing from .env');
+    return stripe;
+}
 
 /**
  * Handle Stripe Service operations following best practices
@@ -10,13 +19,12 @@ const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY);
  */
 const createCustomer = async ({ email, name, phone }) => {
     try {
-        // Search for existing customer first to avoid duplicates
-        const existing = await stripe.customers.list({ email, limit: 1 });
+        const existing = await requireStripe().customers.list({ email, limit: 1 });
         if (existing.data.length > 0) {
             return existing.data[0];
         }
 
-        const customer = await stripe.customers.create({
+        const customer = await requireStripe().customers.create({
             email,
             name,
             phone,
@@ -35,7 +43,7 @@ const createCustomer = async ({ email, name, phone }) => {
  */
 const createSetupIntent = async (customerId) => {
     try {
-        return await stripe.setupIntents.create({
+        return await requireStripe().setupIntents.create({
             customer: customerId,
             payment_method_types: ['card'],
             usage: 'off_session', // Essential for charging when customer is not present
@@ -60,7 +68,7 @@ const chargeSavedCard = async ({ amount, customerId, paymentMethodId, bookingId,
             options.idempotencyKey = idempotencyKey;
         }
 
-        const paymentIntent = await stripe.paymentIntents.create({
+        const paymentIntent = await requireStripe().paymentIntents.create({
             amount: unitAmount,
             currency: currency.toLowerCase(),
             customer: customerId,
@@ -84,14 +92,14 @@ const chargeSavedCard = async ({ amount, customerId, paymentMethodId, bookingId,
  * Retrieve a SetupIntent
  */
 const retrieveSetupIntent = async (setupIntentId) => {
-    return await stripe.setupIntents.retrieve(setupIntentId);
+    return await requireStripe().setupIntents.retrieve(setupIntentId);
 };
 
 /**
  * Retrieve a Checkout Session
  */
 const retrieveCheckoutSession = async (sessionId) => {
-    return await stripe.checkout.sessions.retrieve(sessionId);
+    return await requireStripe().checkout.sessions.retrieve(sessionId);
 };
 
 module.exports = {
