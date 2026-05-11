@@ -225,7 +225,8 @@ const getReservationById = async (req, res) => {
                 d.license_number, d.status as driver_status,
                 u_creator.name as created_by_name,
                 u_creator.email as created_by_email,
-                fb.scheduled_charge_date
+                fb.scheduled_charge_date,
+                fb.tax_amount, fb.gratuity_amount, fb.cc_fee_amount
             FROM reservations r
             LEFT JOIN vehicles v ON r.vehicle_type_id = v.id
             LEFT JOIN vehicle_pricing vp ON v.id = vp.vehicle_id
