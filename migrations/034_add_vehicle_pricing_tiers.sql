@@ -40,7 +40,7 @@ UPDATE vehicle_pricing SET
         JSON_OBJECT('rate', 2.50, 'type', 'per_mile')
     ),
     hourly_tiers = JSON_ARRAY(
-        JSON_OBJECT('hours', 1, 'rate', 150.00, 'type', 'flat', 'minimum', CAST(TRUE AS JSON)),
+        JSON_OBJECT('hours', 1, 'rate', 150.00, 'type', 'flat', 'minimum', 'true'),
         JSON_OBJECT('rate', 80.00, 'type', 'per_hour')
     )
 WHERE vehicle_id = 4;

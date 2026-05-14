@@ -40,12 +40,16 @@ app.use(cors({
             }
         }
 
-        console.log(`CORS blocked: ${origin} not in allowed origins:`, allowedOrigins);
-        return callback(new Error('Not allowed by CORS'));
+        // Default: allow localhost in development
+        if (normalized.includes('localhost')) {
+            return callback(null, true);
+        }
+
+        // Reject all other origins
+        callback(new Error('Not allowed by CORS'));
     },
     credentials: true,
-    methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'Authorization']
+    allowedHeaders: ['Content-Type', 'Authorization', 'Cache-Control']
 }));
 
 // Stripe Webhook needs raw body before express.json()

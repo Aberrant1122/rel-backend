@@ -63,10 +63,10 @@ async function properStart() {
             } else if (migrationError.message.includes('already exists')) {
                 console.log('⚠️  Some migrations already applied, continuing...\n');
             } else {
-                // For other errors, log and continue (Railway will show the error)
-                console.error('⚠️  Migration error (server will still start):');
-                console.error('   ', migrationError.message);
-                console.error('   Please check Railway logs and run migrations manually if needed\n');
+                // For other errors, fail the startup - don't continue silently
+                console.error('❌ Migration failed:', migrationError.message);
+                console.error('   Startup aborted - please fix migration issues and restart\n');
+                process.exit(1);
             }
         }
 

@@ -146,23 +146,7 @@ INSERT IGNORE INTO vehicle_service_classes (vehicle_id, service_class) VALUES
 INSERT IGNORE INTO form_rate_config (id, tax_rate, cc_fee_rate, gratuity_rate, service_multipliers) VALUES
 (1, 0.0879, 0.0375, 0.2000, '{"hourly": 1.0, "airport": 1.1, "event": 1.15, "corporate": 1.2}');
 
--- Re-add foreign key constraint to drivers table if it was dropped
-SET @fk_check = (
-    SELECT COUNT(*) 
-    FROM information_schema.TABLE_CONSTRAINTS 
-    WHERE CONSTRAINT_SCHEMA = DATABASE() 
-    AND TABLE_NAME = 'drivers' 
-    AND CONSTRAINT_NAME = 'drivers_ibfk_2'
-);
-
-SET @add_fk_sql = IF(@fk_check = 0,
-    'ALTER TABLE drivers ADD CONSTRAINT drivers_ibfk_2 FOREIGN KEY (vehicle_id) REFERENCES vehicles(id) ON DELETE SET NULL',
-    'SELECT "Foreign key already exists" AS message'
-);
-
-PREPARE add_fk_stmt FROM @add_fk_sql;
-EXECUTE add_fk_stmt;
-DEALLOCATE PREPARE add_fk_stmt;
+-- Note: Foreign key to drivers table will be handled after drivers table is created in migration 017
 
 -- Re-enable foreign key checks
 SET FOREIGN_KEY_CHECKS = 1;

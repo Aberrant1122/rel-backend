@@ -19,6 +19,10 @@ const getVehicles = async (req, res) => {
         
         const hasSortOrder = columns.length > 0;
         
+        // Allow getting inactive vehicles via query param (for admin editing)
+        const includeInactive = req.query.include_inactive === 'true';
+        const whereClause = includeInactive ? '' : 'WHERE v.is_active = TRUE';
+        
         const [vehicles] = await pool.query(`
             SELECT v.*,
                    vp.base_rate, vp.per_mile, vp.per_hour, vp.per_minute,
@@ -27,7 +31,7 @@ const getVehicles = async (req, res) => {
             FROM vehicles v
             LEFT JOIN vehicle_pricing vp ON v.id = vp.vehicle_id
             LEFT JOIN vehicle_service_classes vsc ON v.id = vsc.vehicle_id
-            WHERE v.is_active = TRUE
+            ${whereClause}
             GROUP BY v.id
             ${hasSortOrder ? 'ORDER BY v.sort_order ASC' : 'ORDER BY v.id ASC'}
         `);
@@ -48,6 +52,7 @@ const getVehicles = async (req, res) => {
             hourly_tiers: typeof v.hourly_tiers === 'string' ? JSON.parse(v.hourly_tiers) : (v.hourly_tiers || null)
         }));
 
+        res.set('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
         res.json({
             success: true,
             data: formattedVehicles
@@ -80,6 +85,7 @@ const getRateConfig = async (req, res) => {
             config.gratuity_rate = parseFloat(config.gratuity_rate || 0);
         }
 
+        res.set('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
         res.json({
             success: true,
             data: config
@@ -385,7 +391,7 @@ const getBookingById = async (req, res) => {
  */
 const upsertVehicle = async (req, res) => {
     try {
-        const { id, slug, label, passenger_capacity, luggage_capacity, description, features, is_active, sort_order, pricing, service_classes } = req.body;
+        const { id, slug, label, passenger_capacity, luggage_capacity, description, features, is_active, sort_order, pricing, service_classes, distance_tiers, hourly_tiers } = req.body;
         
         let vehicleId = id;
         
@@ -406,22 +412,33 @@ const upsertVehicle = async (req, res) => {
             vehicleId = result.insertId;
         }
 
-        // Update Pricing
-        if (pricing) {
-            await pool.query(`
-                INSERT INTO vehicle_pricing (vehicle_id, base_rate, per_mile, per_hour, per_minute, distance_tiers, hourly_tiers)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
-                ON DUPLICATE KEY UPDATE
-                    base_rate = VALUES(base_rate), per_mile = VALUES(per_mile),
-                    per_hour = VALUES(per_hour), per_minute = VALUES(per_minute),
-                    distance_tiers = VALUES(distance_tiers), hourly_tiers = VALUES(hourly_tiers)
-            `, [
-                vehicleId,
-                pricing.base_rate, pricing.per_mile, pricing.per_hour, pricing.per_minute,
-                pricing.distance_tiers ? JSON.stringify(pricing.distance_tiers) : null,
-                pricing.hourly_tiers ? JSON.stringify(pricing.hourly_tiers) : null
-            ]);
-        }
+        // Update Pricing - handle both nested (pricing.distance_tiers) and top-level (distance_tiers) tiers
+        const baseRate = pricing?.base_rate ?? req.body.base_rate ?? 0;
+        const perMile = pricing?.per_mile ?? req.body.per_mile ?? 0;
+        const perHour = pricing?.per_hour ?? req.body.per_hour ?? 0;
+        const perMinute = pricing?.per_minute ?? req.body.per_minute ?? 0;
+        
+        // Accept tiers from pricing object or directly from request body
+        const distTiers = pricing?.distance_tiers ?? distance_tiers;
+        const hrlyTiers = pricing?.hourly_tiers ?? hourly_tiers;
+
+        // Ensure tiers are stored as JSON or null (not undefined or empty string)
+        const distTiersJson = (distTiers !== undefined && distTiers !== null) ? JSON.stringify(distTiers) : null;
+        const hrlyTiersJson = (hrlyTiers !== undefined && hrlyTiers !== null) ? JSON.stringify(hrlyTiers) : null;
+
+        await pool.query(`
+            INSERT INTO vehicle_pricing (vehicle_id, base_rate, per_mile, per_hour, per_minute, distance_tiers, hourly_tiers)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            ON DUPLICATE KEY UPDATE
+                base_rate = VALUES(base_rate), per_mile = VALUES(per_mile),
+                per_hour = VALUES(per_hour), per_minute = VALUES(per_minute),
+                distance_tiers = VALUES(distance_tiers), hourly_tiers = VALUES(hourly_tiers)
+        `, [
+            vehicleId,
+            baseRate, perMile, perHour, perMinute,
+            distTiersJson,
+            hrlyTiersJson
+        ]);
 
         // Update Service Classes
         if (service_classes) {
