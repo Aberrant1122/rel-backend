@@ -698,32 +698,24 @@ const chargeCustomerFromDashboard = async (req, res) => {
                 );
             }
 
-            // Send invoice email for the completed charge
-            const invoiceRef = formBookingRef || (reservationId ? await getBookingRefFromReservation(reservationId) : null);
-            if (invoiceRef) {
-                await sendInvoiceForBookingRef(invoiceRef).catch(err =>
-                    console.error('Non-blocking error sending invoice email for dashboard charge:', err)
+            // Send receipt email for the dashboard charge (always use the new amount + purpose, never the old booking invoice)
+            try {
+                const [userRows] = await pool.query(
+                    'SELECT name, email FROM users WHERE id = ?', [userId]
                 );
-            } else {
-                // No linked booking — send a receipt using user info from the database
-                try {
-                    const [userRows] = await pool.query(
-                        'SELECT name, email FROM users WHERE id = ?', [userId]
-                    );
-                    if (userRows.length > 0 && userRows[0].email) {
-                        await emailService.sendInvoiceEmail({
-                            reservation_number: `CHG-${Date.now().toString().slice(-6)}`,
-                            passenger_name: userRows[0].name || 'Valued Customer',
-                            passenger_email: userRows[0].email,
-                            pickup_date: new Date().toLocaleDateString(),
-                            pickup_time: new Date().toLocaleTimeString(),
-                            description: description || 'Dashboard charge',
-                            price: amount
-                        }).catch(err => console.error('Non-blocking error sending receipt email:', err));
-                    }
-                } catch (userErr) {
-                    console.error('Failed to send receipt email for dashboard charge:', userErr);
+                if (userRows.length > 0 && userRows[0].email) {
+                    await emailService.sendInvoiceEmail({
+                        reservation_number: `CHG-${Date.now().toString().slice(-6)}`,
+                        passenger_name: userRows[0].name || 'Valued Customer',
+                        passenger_email: userRows[0].email,
+                        pickup_date: new Date().toLocaleDateString(),
+                        pickup_time: new Date().toLocaleTimeString(),
+                        description: description || 'Dashboard charge',
+                        price: amount
+                    }).catch(err => console.error('Non-blocking error sending receipt email:', err));
                 }
+            } catch (userErr) {
+                console.error('Failed to send receipt email for dashboard charge:', userErr);
             }
 
             res.json({
