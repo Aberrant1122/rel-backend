@@ -1,6 +1,6 @@
 const express = require('express');
 const router = express.Router();
-const { getAllUsers, createUser, updateProfile, deleteUser, getPassengers, searchPassengers, updateUserById } = require('../controllers/userController');
+const { getAllUsers, createUser, updateProfile, deleteUser, getPassengers, searchPassengers, updateUserById, getPassengerById } = require('../controllers/userController');
 const authMiddleware = require('../middleware/authMiddleware');
 
 // All user routes require authentication
@@ -24,5 +24,6 @@ router.delete('/users/:id', deleteUser);
 // Passenger specific routes
 router.get('/users/passengers', getPassengers);
 router.get('/users/passengers/search', searchPassengers);
+router.get('/users/passengers/:id', getPassengerById);
 
 module.exports = router;

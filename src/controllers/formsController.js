@@ -1,5 +1,6 @@
 const { pool } = require('../config/database');
 const emailService = require('../services/emailService');
+const stripe = require('stripe')((process.env.STRIPE_SECRET_KEY || '').trim());
 
 /**
  * Get all vehicles with pricing and service classes
@@ -97,6 +98,172 @@ const getRateConfig = async (req, res) => {
 };
 
 /** Normalize payment_status for ENUM columns */
+/**
+ * After payment confirm, try to save the payment method for future charges.
+ * Tries multiple approaches: direct params → session → payment_intent_id → Stripe customer sync
+ */
+const savePaymentMethodAfterConfirm = async (bookingRef, stripeSessionId, paymentIntentId, stripeCustomerIdFromReq, stripePaymentMethodIdFromReq) => {
+    try {
+        let paymentMethodId = stripePaymentMethodIdFromReq || null;
+        let stripeCustomerId = stripeCustomerIdFromReq || null;
+
+        // Approach 0: Use payment info passed directly from the form (most reliable)
+        // This avoids cross-account key issues if the form and backend use different Stripe accounts
+        if (paymentMethodId && stripeCustomerId) {
+            const [bookingRows] = await pool.query('SELECT email FROM form_bookings WHERE booking_ref = ?', [bookingRef]);
+            if (bookingRows.length > 0) {
+                const email = bookingRows[0].email;
+                const [users] = await pool.query('SELECT id, stripe_customer_id FROM users WHERE email = ?', [email]);
+                if (users.length > 0) {
+                    const user = users[0];
+                    if (!user.stripe_customer_id) {
+                        await pool.query('UPDATE users SET stripe_customer_id = ? WHERE id = ?', [stripeCustomerId, user.id]);
+                    }
+                    await insertPaymentMethod(user.id, stripeCustomerId, paymentMethodId);
+                    console.log(`Saved payment method ${paymentMethodId} for user ${user.id} via direct params`);
+                    return;
+                }
+            }
+        }
+
+        // Approach 1: Try via Stripe Checkout session (works when same Stripe account)
+        if (!paymentMethodId && stripeSessionId && stripeSessionId.startsWith('cs_')) {
+            try {
+                const session = await stripe.checkout.sessions.retrieve(String(stripeSessionId).trim());
+                if (session.payment_intent) {
+                    const paymentIntent = await stripe.paymentIntents.retrieve(session.payment_intent);
+                    paymentMethodId = paymentIntent.payment_method;
+                    stripeCustomerId = paymentIntent.customer;
+                }
+        } catch (sessionErr) {
+            console.error('savePaymentMethodAfterConfirm - Session lookup failed:', sessionErr);
+        }
+        }
+
+        // Approach 2: Try via payment_intent_id on form_booking
+        if (!paymentMethodId) {
+            const effectivePiId = paymentIntentId || null;
+            if (!effectivePiId) {
+                try {
+                    const [bookings] = await pool.query(
+                        'SELECT payment_intent_id FROM form_bookings WHERE booking_ref = ? AND payment_intent_id IS NOT NULL',
+                        [bookingRef]
+                    );
+                    if (bookings.length > 0 && bookings[0].payment_intent_id) {
+                        const paymentIntent = await stripe.paymentIntents.retrieve(bookings[0].payment_intent_id);
+                        paymentMethodId = paymentIntent.payment_method;
+                        stripeCustomerId = paymentIntent.customer;
+                    }
+                } catch (piErr) {
+                    console.log('PaymentIntent lookup failed:', piErr.message);
+                }
+            } else {
+                try {
+                    const paymentIntent = await stripe.paymentIntents.retrieve(effectivePiId);
+                    paymentMethodId = paymentIntent.payment_method;
+                    stripeCustomerId = paymentIntent.customer;
+                } catch (piErr) {
+                    console.log('PaymentIntent lookup failed:', piErr.message);
+                }
+            }
+        }
+
+        // Get the user info
+        const [bookingRows] = await pool.query('SELECT email FROM form_bookings WHERE booking_ref = ?', [bookingRef]);
+        if (bookingRows.length === 0) return;
+
+        const email = bookingRows[0].email;
+        const [users] = await pool.query('SELECT id, stripe_customer_id FROM users WHERE email = ?', [email]);
+        if (users.length === 0) return;
+
+        const user = users[0];
+
+        // If we got a Stripe customer from the PaymentIntent but user doesn't have one saved
+        if (stripeCustomerId && !user.stripe_customer_id) {
+            await pool.query('UPDATE users SET stripe_customer_id = ? WHERE id = ?', [stripeCustomerId, user.id]);
+        } else if (!stripeCustomerId) {
+            stripeCustomerId = user.stripe_customer_id;
+        }
+
+        // Approach 3: We have a specific PM to save
+        if (paymentMethodId && stripeCustomerId) {
+            await insertPaymentMethod(user.id, stripeCustomerId, paymentMethodId);
+            console.log(`Saved payment method ${paymentMethodId} for user ${user.id} via session/PI`);
+            return;
+        }
+
+        // Approach 4: No specific PM, but user has stripe_customer_id → sync all from Stripe
+        if (stripeCustomerId) {
+            try {
+                const pmList = await stripe.paymentMethods.list({
+                    customer: stripeCustomerId,
+                    type: 'card',
+                });
+                for (const pm of pmList.data) {
+                    await insertPaymentMethod(user.id, stripeCustomerId, pm.id);
+                }
+                if (pmList.data.length > 0) {
+                    console.log(`Synced ${pmList.data.length} payment methods from Stripe for user ${user.id}`);
+                }
+            } catch (syncErr) {
+                console.error('Stripe sync fallback failed:', syncErr.message);
+            }
+        }
+    } catch (error) {
+        console.error('savePaymentMethodAfterConfirm error:', error.message);
+    }
+};
+
+/**
+ * Insert a payment method record if not already saved
+ */
+const insertPaymentMethod = async (userId, stripeCustomerId, paymentMethodId) => {
+    const [existing] = await pool.query(
+        'SELECT id FROM customer_payment_methods WHERE stripe_payment_method_id = ?',
+        [paymentMethodId]
+    );
+    if (existing.length > 0) return existing[0];
+
+    let pm;
+    try {
+        pm = await stripe.paymentMethods.retrieve(paymentMethodId);
+    } catch (pmErr) {
+        pm = null;
+    }
+
+    // Attach the PaymentMethod to the Customer for future off-session reuse
+    try {
+        await stripe.paymentMethods.attach(paymentMethodId, { customer: stripeCustomerId });
+    } catch (attachErr) {
+        // "already attached" errors are safe to ignore
+        if (!attachErr.message?.includes('already')) {
+            console.error('Failed to attach payment method to customer:', attachErr.message);
+        }
+    }
+
+    const [count] = await pool.query(
+        'SELECT COUNT(*) as cnt FROM customer_payment_methods WHERE user_id = ?',
+        [userId]
+    );
+
+    await pool.query(`
+        INSERT INTO customer_payment_methods 
+        (user_id, stripe_customer_id, stripe_payment_method_id, card_brand, card_last4, card_exp_month, card_exp_year, is_default)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    `, [
+        userId,
+        stripeCustomerId,
+        paymentMethodId,
+        pm?.card?.brand || null,
+        pm?.card?.last4 || null,
+        pm?.card?.exp_month?.toString() || null,
+        pm?.card?.exp_year?.toString() || null,
+        count[0].cnt === 0
+    ]);
+
+    return { id: 0 };
+};
+
 function normalizePaymentStatus(value) {
     const v = (value && String(value).toLowerCase()) || 'pending';
     return ['pending', 'paid', 'failed', 'refunded'].includes(v) ? v : 'pending';
@@ -251,7 +418,15 @@ const confirmBookingPayment = async (req, res) => {
             }
         }
 
-        const { booking_ref, stripe_session_id, payment_status } = req.body || {};
+        const {
+            booking_ref,
+            stripe_session_id,
+            payment_status,
+            payment_intent_id,
+            stripe_customer_id,
+            stripe_payment_method_id
+        } = req.body || {};
+
         const ref = booking_ref && String(booking_ref).trim();
         if (!ref) {
             return res.status(400).json({ success: false, message: 'booking_ref is required' });
@@ -265,9 +440,25 @@ const confirmBookingPayment = async (req, res) => {
             return res.status(400).json({ success: false, message: 'Only payment_status paid is supported for confirm' });
         }
 
+        const piId = payment_intent_id ? String(payment_intent_id).trim() : null;
+        const custId = stripe_customer_id ? String(stripe_customer_id).trim() : null;
+
+        // Skip if already processed (prevents duplicate processing from replaying thank-you URL)
+        const [existingBooking] = await pool.query(
+            'SELECT payment_status FROM form_bookings WHERE booking_ref = ?',
+            [ref]
+        );
+        if (existingBooking.length > 0 && existingBooking[0].payment_status === 'paid') {
+            return res.json({
+                success: true,
+                message: 'Payment already confirmed',
+                data: { booking_ref: ref, payment_status: 'paid', already_processed: true }
+            });
+        }
+
         const [formUpdate] = await pool.query(
-            `UPDATE form_bookings SET payment_status = ?, stripe_session_id = ?, updated_at = NOW() WHERE booking_ref = ?`,
-            [payStatus, String(stripe_session_id).trim(), ref]
+            `UPDATE form_bookings SET payment_status = ?, stripe_session_id = ?, payment_intent_id = ?, stripe_customer_id = ?, updated_at = NOW() WHERE booking_ref = ?`,
+            [payStatus, String(stripe_session_id).trim(), piId, custId, ref]
         );
 
         if (formUpdate.affectedRows === 0) {
@@ -305,6 +496,9 @@ const confirmBookingPayment = async (req, res) => {
                 console.error('Non-blocking error sending invoice email:', err);
             });
         }
+
+        // Auto-save the payment method for future charges
+        await savePaymentMethodAfterConfirm(ref, stripe_session_id, piId, custId, stripe_payment_method_id ? String(stripe_payment_method_id).trim() : null);
 
         return res.json({
             success: true,

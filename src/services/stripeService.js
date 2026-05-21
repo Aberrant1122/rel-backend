@@ -1,4 +1,4 @@
-const _stripeKey = process.env.STRIPE_SECRET_KEY;
+const _stripeKey = process.env.STRIPE_SECRET_KEY ? process.env.STRIPE_SECRET_KEY.trim() : null;
 if (!_stripeKey) {
     console.warn('Warning: STRIPE_SECRET_KEY is not set. Stripe features will be unavailable.');
 }
@@ -102,11 +102,33 @@ const retrieveCheckoutSession = async (sessionId) => {
     return await requireStripe().checkout.sessions.retrieve(sessionId);
 };
 
+/**
+ * List saved payment methods for a Stripe customer
+ * @param {string} customerId 
+ */
+const listPaymentMethods = async (customerId) => {
+    const methods = await requireStripe().paymentMethods.list({
+        customer: customerId,
+        type: 'card',
+    });
+    return methods.data;
+};
+
+/**
+ * Retrieve a PaymentIntent by ID
+ * @param {string} paymentIntentId 
+ */
+const retrievePaymentIntent = async (paymentIntentId) => {
+    return await requireStripe().paymentIntents.retrieve(paymentIntentId);
+};
+
 module.exports = {
     createCustomer,
     createSetupIntent,
     chargeSavedCard,
     retrieveSetupIntent,
     retrieveCheckoutSession,
+    listPaymentMethods,
+    retrievePaymentIntent,
     stripe
 };

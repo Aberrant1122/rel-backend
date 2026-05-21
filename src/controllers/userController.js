@@ -195,7 +195,7 @@ const getPassengers = async (req, res) => {
         const query = `
             SELECT id, name, email, phone, role, created_at 
             FROM users 
-            WHERE role IN ('user', 'passenger')
+            WHERE role IN ('user', 'passenger') OR role IS NULL OR role = ''
             ORDER BY created_at DESC
         `;
         const [passengers] = await pool.query(query);
@@ -207,15 +207,24 @@ const getPassengers = async (req, res) => {
             GROUP BY passenger_id
         `);
 
+        // Get saved cards count per user
+        const [cardCounts] = await pool.query(`
+            SELECT user_id, COUNT(*) as card_count
+            FROM customer_payment_methods 
+            GROUP BY user_id
+        `);
+
         // Map stats to passengers
         const enhancedPassengers = passengers.map(p => {
             const stats = tripStats.find(s => s.passenger_id === p.id);
+            const cards = cardCounts.find(c => c.user_id === p.id);
             return {
                 ...p,
                 totalTrips: stats ? stats.total_trips : 0,
                 totalSpent: stats ? parseFloat(stats.total_spent || 0) : 0,
                 lastTripDate: stats ? stats.last_trip : null,
-                status: 'active' // Default status
+                status: 'active', // Default status
+                savedCards: cards ? cards.card_count : 0
             };
         });
 
@@ -239,7 +248,7 @@ const searchPassengers = async (req, res) => {
         const query = `
             SELECT id, name, email, phone, role 
             FROM users 
-            WHERE (role IN ('user', 'passenger'))
+            WHERE (role IN ('user', 'passenger') OR role IS NULL OR role = '')
             AND (name LIKE ? OR email LIKE ? OR phone LIKE ?)
             LIMIT 20
         `;
@@ -252,6 +261,62 @@ const searchPassengers = async (req, res) => {
     }
 };
 
+/**
+ * Get single passenger by ID with full details
+ * GET /api/users/passengers/:id
+ */
+const getPassengerById = async (req, res) => {
+    try {
+        const { id } = req.params;
+
+        const [users] = await pool.query(`
+            SELECT id, name, email, phone, role, stripe_customer_id, created_at 
+            FROM users 
+            WHERE id = ? AND (role IN ('user', 'passenger') OR role IS NULL OR role = '')
+        `, [id]);
+
+        if (users.length === 0) {
+            return errorResponse(res, 404, 'Passenger not found');
+        }
+
+        const user = users[0];
+
+        // Trip stats
+        const [tripStats] = await pool.query(`
+            SELECT COUNT(*) as total_trips, SUM(price) as total_spent, MAX(pickup_date) as last_trip
+            FROM reservations 
+            WHERE passenger_id = ?
+        `, [id]);
+
+        // Saved payment methods count
+        const [pmCount] = await pool.query(`
+            SELECT COUNT(*) as count FROM customer_payment_methods WHERE user_id = ?
+        `, [id]);
+
+        // Recent reservations
+        const [recentReservations] = await pool.query(`
+            SELECT id, reservation_number, pickup_date, pickup_time, pickup_location, dropoff_location, 
+                   price, payment_status, reservation_status, booking_type
+            FROM reservations 
+            WHERE passenger_id = ?
+            ORDER BY created_at DESC
+            LIMIT 10
+        `, [id]);
+
+        return successResponse(res, 200, 'Passenger retrieved successfully', {
+            ...user,
+            totalTrips: tripStats[0].total_trips || 0,
+            totalSpent: parseFloat(tripStats[0].total_spent || 0),
+            lastTripDate: tripStats[0].last_trip || null,
+            savedPaymentMethodsCount: pmCount[0].count || 0,
+            recentTrips: recentReservations
+        });
+    } catch (error) {
+        console.error('Get passenger by ID error:', error);
+        return errorResponse(res, 500, 'Server error while fetching passenger');
+    }
+};
+
 module.exports = {
     getAllUsers,
     createUser,
@@ -259,5 +324,6 @@ module.exports = {
     deleteUser,
     getPassengers,
     searchPassengers,
-    updateUserById
+    updateUserById,
+    getPassengerById
 };

@@ -44,6 +44,12 @@ const sendInvoiceEmail = async (reservation) => {
                         <td style="padding: 12px 0; color: #666;">Date & Time</td>
                         <td style="padding: 12px 0; text-align: right;">${reservation.pickup_date || 'N/A'} at ${reservation.pickup_time || 'N/A'}</td>
                     </tr>
+                    ${reservation.description ? `
+                    <tr style="border-bottom: 1px solid #eee;">
+                        <td style="padding: 12px 0; color: #666;">Purpose</td>
+                        <td style="padding: 12px 0; text-align: right;">${reservation.description}</td>
+                    </tr>
+                    ` : `
                     <tr style="border-bottom: 1px solid #eee;">
                         <td style="padding: 12px 0; color: #666;">Pickup</td>
                         <td style="padding: 12px 0; text-align: right;">${reservation.pickup_location || 'N/A'}</td>
@@ -52,6 +58,7 @@ const sendInvoiceEmail = async (reservation) => {
                         <td style="padding: 12px 0; color: #666;">Dropoff</td>
                         <td style="padding: 12px 0; text-align: right;">${reservation.dropoff_location || 'N/A'}</td>
                     </tr>
+                    `}
                 </table>
 
                 <div style="background-color: #f9f9f9; padding: 16px; border-radius: 6px; display: flex; justify-content: space-between; align-items: center;">

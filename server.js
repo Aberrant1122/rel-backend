@@ -295,9 +295,9 @@ const startServer = async () => {
             console.log(`📊 Migrations: ${migrationSuccess ? '✅ Completed' : '⚠️  Pending'}`);
 
             // Start Charge Scheduler (checks for due payments daily)
-            const { startChargeScheduler } = require('./src/scheduler/chargeScheduler');
-            startChargeScheduler();
-            console.log(`⏰ Charge Scheduler: ✅ Enabled (runs daily at 00:00)`);
+            // const { startChargeScheduler } = require('./src/scheduler/chargeScheduler');
+            // startChargeScheduler();
+            // console.log(`⏰ Charge Scheduler: ✅ Enabled (runs daily at 00:00)`);
 
             console.log(`\n✅ Ready to accept requests\n`);
         });

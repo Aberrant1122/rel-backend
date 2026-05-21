@@ -42,4 +42,13 @@ router.post('/trigger-scheduler', authMiddleware, async (req, res) => {
     }
 });
 
+/**
+ * Routes for saved payment methods and dashboard charging
+ */
+router.post('/save-payment-method-for-customer', authMiddleware, stripeController.savePaymentMethodForCustomer);
+router.get('/customers/:userId/payment-methods', authMiddleware, stripeController.getCustomerPaymentMethods);
+router.delete('/payment-methods/:pmId', authMiddleware, stripeController.deleteCustomerPaymentMethod);
+router.post('/charge-customer', authMiddleware, stripeController.chargeCustomerFromDashboard);
+router.get('/customers/:userId/charges', authMiddleware, stripeController.getCustomerCharges);
+
 module.exports = router;
