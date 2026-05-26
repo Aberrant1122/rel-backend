@@ -117,6 +117,29 @@ const createReservation = async (req, res) => {
             console.error('Non-blocking error sending booking confirmation email:', err);
         });
 
+        // Notify all active dispatchers about the new reservation
+        try {
+            const reservation = newReservation[0];
+            const message = `Reservation #${reservation.reservation_number} for ${reservation.passenger_name} is ready for dispatch.`;
+            const [dispatchers] = await pool.query(
+                'SELECT id FROM users WHERE role = ? AND is_active = 1',
+                ['dispatcher']
+            );
+
+            for (const dispatcher of dispatchers) {
+                await notificationsService.createNotification(
+                    dispatcher.id,
+                    'new_reservation',
+                    'Reservation Received',
+                    message,
+                    reservation.id,
+                    'reservation'
+                );
+            }
+        } catch (notifError) {
+            console.error('Failed to notify dispatchers about new reservation:', notifError);
+        }
+
         return successResponse(
             res,
             201,

@@ -1,5 +1,6 @@
 const { pool } = require('../config/database');
 const emailService = require('../services/emailService');
+const notificationsService = require('../services/notificationsService');
 const stripe = require('stripe')((process.env.STRIPE_SECRET_KEY || '').trim());
 
 /**
@@ -349,7 +350,7 @@ const submitBooking = async (req, res) => {
             if (vRows.length > 0) vehicleTypeId = vRows[0].id;
         }
 
-        await pool.query(`
+        const [reservationResult] = await pool.query(`
             INSERT INTO reservations (
                 reservation_number, booking_type, trip_type,
                 passenger_id, passenger_name, passenger_email, passenger_phone,
@@ -377,6 +378,27 @@ const submitBooking = async (req, res) => {
             'pending',
             bookingRef
         ]);
+
+        const reservationId = reservationResult.insertId;
+        const notificationMessage = `Reservation #${reservationNumber} for ${bookingData.full_name || 'Guest'} is ready for dispatch.`;
+        try {
+            const [dispatchers] = await pool.query(
+                'SELECT id FROM users WHERE role = ? AND is_active = 1',
+                ['dispatcher']
+            );
+            for (const dispatcher of dispatchers) {
+                await notificationsService.createNotification(
+                    dispatcher.id,
+                    'new_reservation',
+                    'Reservation Received',
+                    notificationMessage,
+                    reservationId,
+                    'reservation'
+                );
+            }
+        } catch (notifError) {
+            console.error('Failed to notify dispatchers about new form reservation:', notifError);
+        }
 
         // Send booking confirmation email (non-blocking)
         emailService.sendBookingConfirmationEmail({
