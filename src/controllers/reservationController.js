@@ -1031,25 +1031,48 @@ const sendInvoiceManually = async (req, res) => {
 const deleteReservation = async (req, res) => {
     try {
         const { id } = req.params;
-        // 1. Get the booking reference before deleting
-        const [rows] = await pool.query('SELECT id, form_booking_ref FROM reservations WHERE id = ?', [id]);
+        // 1. Get the booking reference and passenger info before deleting
+        const [rows] = await pool.query(
+            'SELECT id, form_booking_ref, passenger_id FROM reservations WHERE id = ?',
+            [id]
+        );
 
         if (rows.length === 0) {
             return errorResponse(res, 404, 'Reservation not found');
         }
 
         const bookingRef = rows[0].form_booking_ref;
+        const passengerId = rows[0].passenger_id;
 
-        // 2. If it's a form booking with a saved card, cancel the scheduled payment
+        // 2. If it's a form booking, clean up the attached card and booking record
         if (bookingRef) {
-            await pool.query("UPDATE form_bookings SET payment_status = 'cancelled' WHERE booking_ref = ?", [bookingRef]);
-            console.log(`Cancelled scheduled charge for deleted reservation: ${bookingRef}`);
+            // Get the payment method used for this booking
+            const [bookings] = await pool.query(
+                'SELECT stripe_payment_method_id FROM form_bookings WHERE booking_ref = ?',
+                [bookingRef]
+            );
+
+            if (bookings.length > 0) {
+                const stripePaymentMethodId = bookings[0].stripe_payment_method_id;
+
+                // Delete the specific saved card from customer_payment_methods
+                if (stripePaymentMethodId) {
+                    await pool.query(
+                        'DELETE FROM customer_payment_methods WHERE stripe_payment_method_id = ?',
+                        [stripePaymentMethodId]
+                    );
+                }
+
+                // Delete the form booking record
+                await pool.query('DELETE FROM form_bookings WHERE booking_ref = ?', [bookingRef]);
+                console.log(`Deleted form booking and attached card for reservation: ${id}`);
+            }
         }
 
         // 3. Delete the reservation
         await pool.query('DELETE FROM reservations WHERE id = ?', [id]);
 
-        return successResponse(res, 200, 'Reservation and its scheduled charges were deleted successfully');
+        return successResponse(res, 200, 'Reservation and its attached cards were deleted successfully');
     } catch (error) {
         console.error('Delete reservation error:', error);
         return errorResponse(res, 500, 'Failed to delete reservation', error.message);

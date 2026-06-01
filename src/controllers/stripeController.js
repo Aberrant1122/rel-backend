@@ -463,7 +463,7 @@ const savePaymentMethodForCustomer = async (req, res) => {
         const cardExpMonth = pm.card?.exp_month?.toString() || null;
         const cardExpYear = pm.card?.exp_year?.toString() || null;
 
-        // Check if this payment method is already saved
+        // Check if this payment method ID is already saved
         const [existing] = await pool.query(
             'SELECT id FROM customer_payment_methods WHERE stripe_payment_method_id = ?',
             [paymentMethodId]
@@ -471,6 +471,29 @@ const savePaymentMethodForCustomer = async (req, res) => {
 
         if (existing.length > 0) {
             return res.json({ success: true, message: 'Payment method already saved', data: existing[0] });
+        }
+
+        // Check if the same physical card (by brand + last4 + user) is already saved
+        if (cardBrand && cardLast4) {
+            const [existingCard] = await pool.query(
+                `SELECT id FROM customer_payment_methods 
+                 WHERE user_id = ? AND card_brand = ? AND card_last4 = ?`,
+                [userId, cardBrand, cardLast4]
+            );
+            if (existingCard.length > 0) {
+                await pool.query(
+                    `UPDATE customer_payment_methods 
+                     SET stripe_payment_method_id = ?, stripe_customer_id = ?, 
+                         card_exp_month = ?, card_exp_year = ?
+                     WHERE id = ?`,
+                    [paymentMethodId, stripeCustomerId, cardExpMonth, cardExpYear, existingCard[0].id]
+                );
+                return res.json({
+                    success: true,
+                    message: 'Existing card updated with new payment method',
+                    data: existingCard[0]
+                });
+            }
         }
 
         // Check if this is the first payment method for this user (make it default)
@@ -546,7 +569,7 @@ const getCustomerPaymentMethods = async (req, res) => {
                 const cardExpMonth = pm.card?.exp_month?.toString() || null;
                 const cardExpYear = pm.card?.exp_year?.toString() || null;
 
-                // Check if already saved (race condition guard)
+                // Check if already saved by payment method ID (race condition guard)
                 const [existing] = await pool.query(
                     'SELECT id FROM customer_payment_methods WHERE stripe_payment_method_id = ?',
                     [pm.id]
@@ -555,6 +578,26 @@ const getCustomerPaymentMethods = async (req, res) => {
                 if (existing.length > 0) {
                     savedMethods.push(existing[0]);
                     continue;
+                }
+
+                // Check if the same physical card is already saved for this user
+                if (cardBrand && cardLast4) {
+                    const [existingCard] = await pool.query(
+                        `SELECT id FROM customer_payment_methods 
+                         WHERE user_id = ? AND card_brand = ? AND card_last4 = ?`,
+                        [userId, cardBrand, cardLast4]
+                    );
+                    if (existingCard.length > 0) {
+                        await pool.query(
+                            `UPDATE customer_payment_methods 
+                             SET stripe_payment_method_id = ?, stripe_customer_id = ?,
+                                 card_exp_month = ?, card_exp_year = ?
+                             WHERE id = ?`,
+                            [pm.id, stripeCustomerId, cardExpMonth, cardExpYear, existingCard[0].id]
+                        );
+                        savedMethods.push(existingCard[0]);
+                        continue;
+                    }
                 }
 
                 const [count] = await pool.query(

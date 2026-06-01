@@ -232,6 +232,31 @@ const insertPaymentMethod = async (userId, stripeCustomerId, paymentMethodId) =>
         pm = null;
     }
 
+    // Check if the same physical card (by brand + last4 + user) is already saved
+    if (pm?.card?.brand && pm?.card?.last4) {
+        const [existingCard] = await pool.query(
+            `SELECT id, stripe_payment_method_id FROM customer_payment_methods 
+             WHERE user_id = ? AND card_brand = ? AND card_last4 = ?`,
+            [userId, pm.card.brand, pm.card.last4]
+        );
+        if (existingCard.length > 0) {
+            await pool.query(
+                `UPDATE customer_payment_methods 
+                 SET stripe_payment_method_id = ?, stripe_customer_id = ?, 
+                     card_exp_month = ?, card_exp_year = ?
+                 WHERE id = ?`,
+                [
+                    paymentMethodId,
+                    stripeCustomerId,
+                    pm.card.exp_month?.toString() || null,
+                    pm.card.exp_year?.toString() || null,
+                    existingCard[0].id
+                ]
+            );
+            return existingCard[0];
+        }
+    }
+
     // Attach the PaymentMethod to the Customer for future off-session reuse
     try {
         await stripe.paymentMethods.attach(paymentMethodId, { customer: stripeCustomerId });
